@@ -24,49 +24,67 @@ function pickJson(text: string) {
 }
 
 // ── Gemini (무료 티어) ──
-let geminiModel: string | null = Deno.env.get("GEMINI_MODEL") ?? null;
-async function pickGeminiModel(key: string) {
-  if (geminiModel) return geminiModel;
+async function listGemini(key: string): Promise<string[]> {
   const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key } });
   const d = await r.json();
-  const names: string[] = (d.models ?? [])
+  return (d.models ?? [])
     .filter((m: { supportedGenerationMethods?: string[] }) => m.supportedGenerationMethods?.includes("generateContent"))
-    .map((m: { name: string }) => m.name.replace("models/", ""))
-    .filter((n: string) => /^gemini-[\d.]+-flash$/.test(n));
-  names.sort((a, b) => parseFloat(b.split("-")[1]) - parseFloat(a.split("-")[1]));
-  geminiModel = names[0] ?? "gemini-2.5-flash";
-  return geminiModel;
+    .map((m: { name: string }) => m.name.replace("models/", ""));
 }
+function rankFlash(names: string[]) {
+  const ver = (n: string) => parseFloat((n.match(/gemini-([\d.]+)/) ?? [0, "0"])[1]);
+  return names
+    .filter((n) => /flash/.test(n) && !/lite|image|live|tts|audio|thinking|exp|8b|vision|robotics/.test(n))
+    .sort((a, b) => (/preview/.test(a) ? 1 : 0) - (/preview/.test(b) ? 1 : 0) || ver(b) - ver(a));
+}
+function rankLite(names: string[]) {
+  const ver = (n: string) => parseFloat((n.match(/gemini-([\d.]+)/) ?? [0, "0"])[1]);
+  return names
+    .filter((n) => /flash-lite/.test(n) && !/image|live|tts|audio|exp|8b|vision|robotics/.test(n))
+    .sort((a, b) => (/preview/.test(a) ? 1 : 0) - (/preview/.test(b) ? 1 : 0) || ver(b) - ver(a));
+}
+let configModels: string[] = [];
+let geminiModels: string[] | null = null;
+async function geminiCandidates(key: string) {
+  if (geminiModels) return geminiModels;
+  const env = Deno.env.get("GEMINI_MODEL");
+  let all: string[] = [];
+  try { all = await listGemini(key); } catch (e) { console.error("list-models", (e as Error).message); }
+  geminiModels = [...new Set([...configModels, ...(env ? [env] : []), ...rankFlash(all).slice(0, 2), ...rankLite(all).slice(0, 2), "gemini-flash-lite-latest", "gemini-flash-latest"])].slice(0, 7);
+  return geminiModels;
+}
+let workingModel: string | null = null;
 async function gemini(key: string, system: string, blocks: Block[], maxTokens: number) {
-  let first = "gemini-2.5-flash";
-  try { first = await pickGeminiModel(key); } catch (e) { console.error("pick-model", (e as Error).message); }
-  const models = [...new Set([first, "gemini-2.5-flash", "gemini-2.5-flash-lite"])];
+  const models = workingModel ? [workingModel] : await geminiCandidates(key);
   const parts = blocks.map((b) => ("text" in b ? { text: b.text } : { inline_data: { mime_type: "image/jpeg", data: b.image } }));
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts }],
-    generationConfig: { responseMimeType: "application/json", maxOutputTokens: Math.max(maxTokens, 8192) },
+    generationConfig: { responseMimeType: "application/json", maxOutputTokens: Math.max(maxTokens, 4096) },
   });
+  const t0 = Date.now();
   let last = "";
   for (const model of models) {
+    if (Date.now() - t0 > 34000) break;
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: "POST", headers: { "x-goog-api-key": key, "content-type": "application/json" }, body,
+        method: "POST", headers: { "x-goog-api-key": key, "content-type": "application/json" }, body, signal: AbortSignal.timeout(9000),
       });
       if (!r.ok) {
         last = String(r.status);
         console.error("gemini", model, r.status, (await r.text()).slice(0, 300));
-        if (r.status === 429 || r.status >= 500) await sleep(500);
+        if (r.status === 429 || r.status >= 500) await sleep(300);
         continue;
       }
       const d = await r.json();
       const text = (d.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
-      try { return pickJson(text); } catch { last = "json"; console.error("gemini-json", model, text.slice(0, 200)); }
+      try { const out = pickJson(text); workingModel = model; return out; } catch { last = "json"; console.error("gemini-json", model, text.slice(0, 200)); }
     } catch (e) { last = "net"; console.error("gemini-net", model, (e as Error).message); }
   }
+  workingModel = null; geminiModels = null;
   const a = Deno.env.get("ANTHROPIC_API_KEY");
   if (a) return claude(a, true, system, blocks, maxTokens);
-  throw new Error(last === "429" ? "AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요." : last === "400" || last === "403" ? "AI 키가 올바르지 않아요. 키를 다시 발급해 등록해 주세요." : `AI 호출 실패 (${last})`);
+  throw new Error(last === "429" ? "AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요." : last === "400" || last === "403" ? "AI 키가 올바르지 않아요. 키를 다시 발급해 등록해 주세요." : `AI 응답이 늦어요 (${last || "timeout"}). 잠시 후 다시 시도해 주세요.`);
 }
 
 // ── Claude ──
@@ -105,9 +123,30 @@ Deno.serve(async (req) => {
     if (allowed === false) return json({ error: `오늘 AI 사용 한도(${limit}회)를 모두 썼어요. 내일 다시 이용해 주세요.` }, 429);
 
     const body = await req.json();
+    try { // 모델 목록은 DB(ai_config)에서 배포 없이 바꿀 수 있음
+      const { data: cfg } = await sb.from("ai_config").select("models").maybeSingle();
+      const m: string[] = cfg?.models ?? [];
+      if (m.join() !== configModels.join()) { configModels = m; geminiModels = null; workingModel = null; }
+    } catch { /* ignore */ }
     if (typeof body.image === "string" && body.image.length >= 2_500_000) return json({ error: "이미지가 너무 커요. 다른 쪽이나 더 작은 파일로 시도해 주세요." }, 413);
     const img = typeof body.image === "string" ? body.image : null;
     const withImg = (text: string): Block[] => (img ? [{ image: img }, { text }] : [{ text }]);
+
+    if (body.action === "diag") {
+      const g = Deno.env.get("GEMINI_API_KEY");
+      const probe: { model: string; status: string; ms: number }[] = [];
+      if (g && body.probe) {
+        const list: string[] = Array.isArray(body.models) && body.models.length ? body.models.slice(0, 8) : await geminiCandidates(g);
+        for (const m of list) {
+          const t = Date.now();
+          try {
+            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", headers: { "x-goog-api-key": g, "content-type": "application/json" }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "say ok" }] }] }), signal: AbortSignal.timeout(12000) });
+            probe.push({ model: m, status: String(r.status), ms: Date.now() - t });
+          } catch (e) { probe.push({ model: m, status: (e as Error).name, ms: Date.now() - t }); }
+        }
+      }
+      return json({ has_gemini_key: !!g, has_claude_key: !!Deno.env.get("ANTHROPIC_API_KEY"), picked: g ? await geminiCandidates(g) : [], working: workingModel, probe });
+    }
 
     if (body.action === "classify") {
       const sys = `당신은 학습 자료 정리 도우미입니다. 업로드된 파일을 카테고리로 분류하세요.

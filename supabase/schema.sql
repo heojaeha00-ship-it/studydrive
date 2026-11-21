@@ -100,3 +100,12 @@ create policy "files update own" on storage.objects for update to authenticated
 create policy "files delete own" on storage.objects for delete to authenticated
   using (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
 revoke execute on function public.hit_ai_usage(int) from anon;
+
+-- Gemini 모델 목록: 배포 없이 DB에서 바꿀 수 있음 (비어 있으면 함수가 자동 선택)
+create table if not exists public.ai_config (
+  id int primary key default 1 check (id = 1),
+  models text[] not null default '{}'
+);
+alter table public.ai_config enable row level security;
+create policy "ai_config read" on public.ai_config for select to authenticated using (true);
+insert into public.ai_config (id, models) values (1, array['gemini-3-flash-preview','gemini-flash-lite-latest','gemini-3.5-flash-lite','gemini-3.1-flash-lite']) on conflict (id) do nothing;
