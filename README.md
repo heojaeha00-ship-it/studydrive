@@ -13,7 +13,7 @@
 
 ## 배포 (한 번만)
 1. Supabase 프로젝트 생성 → SQL Editor에 `supabase/schema.sql` 전체 실행
-2. Authentication → Providers → Email → **Confirm email 끄기** (심사위원 가입이 쉬워짐)
+2. Authentication → Sign In / Providers: **Allow anonymous sign-ins 켜기**(가입 없이 체험), Email의 **Confirm email 끄기**(선택)
 3. Edge Functions → Deploy a new function → 이름 `ai` → `supabase/functions/ai/index.ts` 붙여넣기 → Deploy
 4. Edge Functions → Secrets → AI 키 추가 (둘 중 하나)
    - **무료**: `GEMINI_API_KEY` — https://aistudio.google.com/apikey 에서 발급 (카드 불필요)
