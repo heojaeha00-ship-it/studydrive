@@ -37,6 +37,7 @@ create table if not exists public.mistakes (
   graduated boolean default false,
   last_result text,
   ai jsonb,
+  hist jsonb default '[]'::jsonb,
   created_at timestamptz default now()
 );
 
@@ -83,9 +84,19 @@ values ('files', 'files', false, 52428800) on conflict (id) do nothing;
 
 create policy "files select own" on storage.objects for select to authenticated
   using (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
+-- 사용자당 100MB 저장 한도를 서버에서 강제
 create policy "files insert own" on storage.objects for insert to authenticated
-  with check (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
+  with check (
+    bucket_id = 'files'
+    and (storage.foldername(name))[1] = auth.uid()::text
+    and (
+      select coalesce(sum((o.metadata->>'size')::bigint), 0)
+      from storage.objects o
+      where o.bucket_id = 'files' and (storage.foldername(o.name))[1] = auth.uid()::text
+    ) < 104857600
+  );
 create policy "files update own" on storage.objects for update to authenticated
   using (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "files delete own" on storage.objects for delete to authenticated
   using (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
+revoke execute on function public.hit_ai_usage(int) from anon;

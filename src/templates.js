@@ -21,27 +21,7 @@ export const TEMPLATES = [
     steps: ['PDF 문제집을 올리면 AI가 LC/RC로 자동 분류', '풀다가 틀린 문제에서 [오답 등록]', '내일부터 [오늘 복습]에 자동으로 떠요'],
     notes: [
       {
-        name: '토익 Part5 샘플 문제 (직접 제작).md', category: 'RC(독해)', tags: [EX, 'Part5'], summary: '문법·어휘 5문제 연습용 샘플',
-        content: `# 토익 Part 5 샘플 (직접 만든 예시 문제)
-
-1. The manager asked all employees to ______ the report before Friday.
-   (A) submit  (B) submitting  (C) submission  (D) submitted
-
-2. The company will ______ a new energy-saving policy next month.
-   (A) implement  (B) appoint  (C) attend  (D) reserve
-
-3. Ms. Park was ______ for her outstanding contribution to the project.
-   (A) recognize  (B) recognized  (C) recognition  (D) recognizing
-
-4. Please keep your receipt ______ you need to return the item.
-   (A) in case  (B) because of  (C) as well as  (D) whereas
-
-5. The new software is ______ faster than the previous version.
-   (A) significant  (B) significantly  (C) signify  (D) significance
-
----
-정답: 1 A / 2 A / 3 B / 4 A / 5 B
-`,
+        name: 'TOEIC Part5 샘플 문제 (직접 제작).pdf', category: 'RC(독해)', tags: [EX, 'Part5'], summary: '문법·어휘 5문제 연습용 샘플', sample: 'toeic5',
       },
       {
         name: '토익 필수 어휘 체크리스트 (예시).md', category: '어휘', tags: [EX, '어휘'], summary: '자주 나오는 비즈니스 어휘 10개',
@@ -132,6 +112,7 @@ export const TEMPLATES = [
 "절반으로 줄인다 = log" 로 연결해서 기억하기.
 `,
       },
+      { name: '필기 연습 노트 (예시).pdf', category: '노트', tags: [EX, '노트', '줄노트'], summary: '펜으로 필기해 보는 빈 노트', blank: 'lined' },
       {
         name: '중간고사 체크리스트 (예시).md', category: '시험', tags: [EX, '시험'], summary: '범위 확인·오답 복습·AI 퀴즈 순서',
         content: `# 중간고사 체크리스트 (예시)
@@ -188,6 +169,7 @@ export const TEMPLATES = [
 - 임진왜란 3대 대첩: 한산도·진주·행주
 `,
       },
+      { name: '필기 연습 노트 (예시).pdf', category: '노트', tags: [EX, '노트', '줄노트'], summary: '펜으로 필기해 보는 빈 노트', blank: 'lined' },
       {
         name: '기출 풀이 루틴 (예시).md', category: '기출', tags: [EX, '루틴'], summary: '풀이 → 오답 등록 → 복습',
         content: `# 기출 풀이 루틴 (예시)

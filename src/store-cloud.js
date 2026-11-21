@@ -55,11 +55,11 @@ export function cloud(cfg) {
       async user() { return (await session())?.user ?? null; },
       async signIn(email, password) { ok(await sb.auth.signInWithPassword({ email, password })); },
       async signUp(email, password) {
-        const d = ok(await sb.auth.signUp({ email, password }));
+        const d = ok(await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }));
         if (!d.session) throw new Error('가입 확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.');
       },
       async signInAnon() { ok(await sb.auth.signInAnonymously()); },
-      async upgrade(email, password) { ok(await sb.auth.updateUser({ email, password })); },
+      async upgrade(email, password) { ok(await sb.auth.updateUser({ email, password }, { emailRedirectTo: location.origin + location.pathname })); },
       signOut: () => sb.auth.signOut(),
     },
     files, ann, mistakes,
@@ -68,7 +68,8 @@ export function cloud(cfg) {
       async set(v) { const uid = (await session()).user.id; ok(await sb.from('profiles').upsert({ user_id: uid, data: v, updated_at: new Date().toISOString() })); },
     },
     async ai(action, payload) {
-      const { data, error } = await sb.functions.invoke('ai', { body: { action, ...payload } });
+      const call = sb.functions.invoke('ai', { body: { action, ...payload } });
+      const { data, error } = await Promise.race([call, new Promise((_, rej) => setTimeout(() => rej(new Error('AI 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.')), 45000))]);
       if (error) {
         let msg = error.message;
         try { msg = (await error.context.json()).error || msg; } catch {}

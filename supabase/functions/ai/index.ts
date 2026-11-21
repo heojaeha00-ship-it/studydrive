@@ -37,22 +37,30 @@ async function pickGeminiModel(key: string) {
   return geminiModel;
 }
 async function gemini(key: string, system: string, blocks: Block[], maxTokens: number) {
-  const model = await pickGeminiModel(key);
+  const first = await pickGeminiModel(key);
+  const models = [...new Set([first, "gemini-2.5-flash", "gemini-2.5-flash-lite"])];
   const parts = blocks.map((b) => ("text" in b ? { text: b.text } : { inline_data: { mime_type: "image/jpeg", data: b.image } }));
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: { "x-goog-api-key": key, "content-type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: Math.max(maxTokens, 8192) },
-    }),
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: "user", parts }],
+    generationConfig: { responseMimeType: "application/json", maxOutputTokens: Math.max(maxTokens, 8192) },
   });
-  if (r.status === 429) throw new Error("AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요.");
-  if (!r.ok) throw new Error(`AI 호출 실패 (${r.status})`);
-  const d = await r.json();
-  const text = (d.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
-  return pickJson(text);
+  let last = "";
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST", headers: { "x-goog-api-key": key, "content-type": "application/json" }, body,
+      });
+      if (r.status === 429 || r.status >= 500) { last = String(r.status); await new Promise((res) => setTimeout(res, 700)); continue; }
+      if (!r.ok) { last = String(r.status); break; }
+      const d = await r.json();
+      const text = (d.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+      try { return pickJson(text); } catch { last = "json"; }
+    }
+  }
+  const a = Deno.env.get("ANTHROPIC_API_KEY");
+  if (a) return claude(a, true, system, blocks, maxTokens);
+  throw new Error(last === "429" ? "AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요." : `AI 호출 실패 (${last})`);
 }
 
 // ── Claude ──
@@ -85,7 +93,7 @@ Deno.serve(async (req) => {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return json({ error: "로그인이 필요해요" }, 401);
 
-    const limit = user.is_anonymous ? Math.min(LIMIT, 20) : LIMIT; // 게스트는 더 낮은 한도
+    const limit = user.email === "demo@studydrive.app" ? 500 : user.is_anonymous ? Math.min(LIMIT, 20) : LIMIT; // 공용 데모는 넉넉히, 게스트는 낮게
     const { data: allowed } = await sb.rpc("hit_ai_usage", { max_n: limit });
     if (allowed === false) return json({ error: `오늘 AI 사용 한도(${limit}회)를 모두 썼어요. 내일 다시 이용해 주세요.` }, 429);
 
@@ -102,6 +110,7 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === "explain") {
+      if (!img && String(body.memo ?? "").trim().length < 10) return json({ error: "원본 쪽이 없어 해설할 수 없어요. 파일에서 오답 등록해 주세요." }, 422);
       const sys = `당신은 시험 전문 강사입니다(토익이면 토익 강사). 학생이 틀린 문제를 한국어로 설명하세요. 이미지가 있으면 그 문제를 읽고 설명합니다.
 반드시 JSON만 출력:
 {"translation":"문제/지문 핵심 해석","answer":"정답과 그 근거","reason":"학생이 틀렸을 법한 이유(학생이 고른 원인 참고)","tip":"다음에 같은 유형을 맞히는 요령 한두 문장","similar":[{"question":"유사 문제","choices":["(A)...","(B)...","(C)...","(D)..."],"answer":"(B)","explanation":"한국어 해설"}]}
@@ -112,9 +121,15 @@ Deno.serve(async (req) => {
     if (body.action === "ask") {
       const sys = `당신은 학습 도우미입니다. 첨부된 쪽(이미지)의 내용을 근거로 한국어로 간결하게 답하세요.
 쪽에 없는 내용은 "이 쪽에는 없어요"라고 말하고, 일반 지식으로 보충할 땐 "일반 지식:"이라고 구분하세요.
-반드시 JSON만 출력: {"answer":"답변 (마크다운 기호 없이 줄바꿈으로 구분)"}`;
+반드시 JSON만 출력: {"answer":"답변 (마크다운 기호 없이 줄바꿈으로 구분)","quote":"근거가 된 쪽의 원문 15자 이내(없으면 빈 문자열)"}`;
       const hist = (Array.isArray(body.history) ? body.history : []).slice(-6).map((h: { role: string; content: string }) => `${h.role === "user" ? "학생" : "도우미"}: ${String(h.content).slice(0, 600)}`).join("\n");
       return json(await llm(true, sys, withImg(`${hist ? `이전 대화:\n${hist}\n\n` : ""}학생 질문: ${String(body.question ?? "").slice(0, 800)}`), 1500));
+    }
+
+    if (body.action === "cards") {
+      const sys = `당신은 암기 카드 제작 도우미입니다. 첨부된 쪽(이미지)에서 시험에 나올 핵심 개념·어휘·공식을 최대 5개 골라 카드로 만드세요. 한국어.
+반드시 JSON만 출력: {"cards":[{"front":"질문 또는 용어","back":"답 또는 뜻(한두 문장)"}]}`;
+      return json(await llm(false, sys, withImg("이 쪽의 핵심 암기 카드를 만들어 주세요."), 1200));
     }
 
     if (body.action === "quiz") {

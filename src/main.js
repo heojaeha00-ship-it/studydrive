@@ -4,7 +4,7 @@ import { cloud } from './store-cloud.js';
 import { openDoc, pageText, pageImage } from './pdf.js';
 import { mountViewer } from './viewer.js';
 import { TEMPLATES, PRESETS, SCENARIOS } from './templates.js';
-import { PAPERS, paperKey, makeNotePdf, addPages } from './blank.js';
+import { PAPERS, paperKey, makeNotePdf, addPages, makeSamplePdf } from './blank.js';
 
 const cfg = window.SD_CONFIG || {};
 const store = cfg.url && cfg.key ? cloud(cfg) : local();
@@ -24,6 +24,21 @@ const saveS = () => store.settings.set(S).catch(() => {});
 const bump = () => { S.activity[today()] = (S.activity[today()] || 0) + 1; saveS(); };
 const flag = (k) => { if (!S.flags[k]) { S.flags[k] = 1; saveS(); } };
 const streak = () => { let i = S.activity[today()] > 0 ? 0 : 1, n = 0; while (S.activity[today(-i)] > 0) { n++; i++; } return n; };
+const hist = () => mistakes.flatMap((m) => m.hist || []);
+function growthHtml() {
+  const h = hist(), parts = [];
+  if (S.goal?.date) { const n = Math.ceil((new Date(S.goal.date) - new Date(today())) / 864e5); if (n >= 0) parts.push(`<span>🎯 <b>D-${n}</b>${S.goal.target ? ` · 목표 ${esc(S.goal.target)}점` : ''}</span>`); }
+  if (h.length >= 4) {
+    const good = (x) => x.r === 'good' || x.r === 'easy';
+    const pct = (a) => (a.length ? Math.round((a.filter(good).length / a.length) * 100) : null);
+    const since = today(-7), pr = pct(h.filter((x) => x.d > since)), pb = pct(h.filter((x) => x.d <= since));
+    parts.push(`<span>복습 ${h.length}회</span>`);
+    if (pr != null) parts.push(`<span>최근 7일 기억률 <b>${pr}%</b>${pb != null ? ` <small class="muted">(이전 ${pb}%)</small>` : ''}</span>`);
+  }
+  const q = (S.quizLog || []).slice(-5);
+  if (q.length) parts.push(`<span>퀴즈 평균 <b>${Math.round((q.reduce((a, x) => a + x.score / x.n, 0) / q.length) * 100)}%</b> <small class="muted">(${q.length}회)</small></span>`);
+  return parts.length ? `<div class="growth card"><b>📈 나의 성장</b>${parts.join('')}</div>` : '';
+}
 const due = () => mistakes.filter((m) => !m.graduated && m.next_review <= today());
 const steps = () => [files.length > 0, !!S.flags.draw, mistakes.length > 0, mistakes.some((m) => m.last_result)];
 const STEP_LABEL = ['파일 올리기', '필기해 보기', '오답 등록', '복습 1회'];
@@ -98,7 +113,7 @@ function authView() {
   $('[data-m=up]', f).addEventListener('click', () => f.reportValidity() && go('up', f.email.value, f.pw.value));
   $('#demo')?.addEventListener('click', async () => {
     try { await store.auth.signInAnon(); route.loaded = false; route(); } // 방문자마다 개인 공간
-    catch { if (cfg.demoEmail) { toast('개인 체험 공간을 못 만들어 공용 데모 계정으로 들어가요 (다른 방문자와 데이터가 섞일 수 있어요)', 5000); go('in', cfg.demoEmail, cfg.demoPassword); } else toast('체험 시작에 실패했어요. 잠시 후 다시 시도해 주세요.'); }
+    catch (e) { if (cfg.demoEmail && /anonymous|disabled|not allowed|422|signups/i.test(String(e?.message))) { toast('개인 체험 공간을 못 만들어 공용 데모 계정으로 들어가요 (다른 방문자와 데이터가 섞일 수 있어요)', 5000); go('in', cfg.demoEmail, cfg.demoPassword); } else toast('체험 시작에 실패했어요. 네트워크를 확인하고 다시 시도해 주세요.'); }
   });
 }
 
@@ -122,10 +137,12 @@ async function filesView() {
   $('#q').addEventListener('input', (e) => { filter.q = e.target.value; drawFiles(); });
   $('#newnote').addEventListener('click', noteDialog);
   $('#up').addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });
-  const drop = $('#drop');
-  addEventListener('dragover', (e) => { if ($('#grid')) { e.preventDefault(); drop.classList.add('on'); } });
-  addEventListener('dragleave', (e) => { if (!e.relatedTarget) drop.classList.remove('on'); });
-  addEventListener('drop', (e) => { if ($('#grid')) { e.preventDefault(); drop.classList.remove('on'); handleFiles([...e.dataTransfer.files]); } });
+  if (!filesView.bound) {
+    filesView.bound = true;
+    addEventListener('dragover', (e) => { if ($('#grid')) { e.preventDefault(); $('#drop')?.classList.add('on'); } });
+    addEventListener('dragleave', (e) => { if (!e.relatedTarget) $('#drop')?.classList.remove('on'); });
+    addEventListener('drop', (e) => { if ($('#grid')) { e.preventDefault(); $('#drop')?.classList.remove('on'); handleFiles([...e.dataTransfer.files]); } });
+  }
 }
 
 function statsHtml() {
@@ -142,7 +159,7 @@ function statsHtml() {
 function drawFiles() {
   const cats = [...new Set([...(S.cats || []), ...files.map((f) => f.category || '미분류')])];
   if (filter.cat !== '전체' && !cats.includes(filter.cat)) filter.cat = '전체';
-  $('#stats').innerHTML = statsHtml();
+  $('#stats').innerHTML = statsHtml() + growthHtml();
   const st = steps(), dn = st.filter(Boolean).length;
   $('#banner').innerHTML = dn < 4 ? `<a class="banner" href="#/explore">🚀 시작 가이드 ${dn}/4 · 다음: <b>${STEP_LABEL[st.indexOf(false)]}</b> (둘러보기에서 시작)</a>` : '';
   $('#chips').innerHTML = ['전체', ...cats].map((c) => `<button class="chip${filter.cat === c ? ' on' : ''}" data-c="${esc(c)}">${esc(c)} <small>${c === '전체' ? files.length : files.filter((f) => (f.category || '미분류') === c).length}</small></button>`).join('');
@@ -266,6 +283,14 @@ async function viewerView(id, page) {
     store, row, page,
     onBack: () => (location.hash = '#/files'),
     onEvent: flag,
+    onCards: async (image) => {
+      const t = toast('🃏 암기 카드를 만드는 중…', 0);
+      try { const r = await ai('cards', { image }); t.close(); return r.cards || []; } catch (e) { t.close(); toast('카드 만들기 실패: ' + e.message, 5000); return []; }
+    },
+    onAddCard: async (c, page) => {
+      const m = await store.mistakes.add({ file_id: row.id, file_name: row.name, page, label: '[카드] ' + String(c.front).slice(0, 40), reason: S.reasons[S.reasons.length - 1] || '기타', memo: String(c.front), stage: 0, next_review: today(S.intervals[0]), graduated: false, ai: { answer: String(c.back), sample: false } });
+      mistakes.unshift(m); badge(); bump();
+    },
     onAppend: async () => {
       const cur = files.find((f) => f.id === id) || row;
       const { blob, count } = await addPages(await store.files.blob(cur), paperKey(cur.tags), 1);
@@ -354,7 +379,7 @@ async function reviewView() {
   view.innerHTML = '<p class="muted pad">불러오는 중…</p>';
   try { mistakes = await store.mistakes.list(); if (!files.length) files = await store.files.list(); } catch (e) { view.innerHTML = `<p class="pad muted">${esc(e.message)}</p>`; return; }
   badge();
-  queue = due(); qi = 0; done = {};
+  queue = due(); qi = 0; done = {}; sessionLog = []; conf = null;
   view.innerHTML = '<div id="rv" class="narrow"></div>';
   drawReview();
 }
@@ -364,7 +389,7 @@ function drawReview() {
     const nxt = mistakes.filter((m) => !m.graduated).map((m) => m.next_review).sort()[0];
     const tot = Object.values(done).reduce((a, b) => a + b, 0);
     rv.innerHTML = `<div class="empty"><div>${queue.length ? '🎉' : '✅'}</div><h2>${queue.length ? '오늘 복습 끝!' : '오늘 복습할 오답이 없어요'}</h2>
-      ${queue.length ? `<p>${tot}개 완료 · 🔥 연속 ${streak()}일</p>` : ''}<p class="muted">${nxt ? `다음 복습: ${nxt}` : '파일을 풀다가 틀린 문제를 오답 등록해 보세요.'}</p>
+      ${queue.length ? `<p>${tot}개 완료 · 🔥 연속 ${streak()}일</p>${insightHtml()}` : ''}<p class="muted">${nxt ? `다음 복습: ${nxt}` : '파일을 풀다가 틀린 문제를 오답 등록해 보세요.'}</p>
       <div class="row" style="justify-content:center"><a class="btn" href="#/quiz">🎯 AI 맞춤 퀴즈</a><a class="btn primary" href="#/files">내 파일로</a></div></div>`;
     return;
   }
@@ -376,6 +401,7 @@ function drawReview() {
       <h2>${esc(m.label)}</h2>
       <p class="muted">${esc(m.file_name || '')} ${m.page ? `· ${m.page}쪽` : ''} · <span class="badge">${esc(m.reason)}</span></p>
       ${m.memo ? P('📝 ' + m.memo) : ''}
+      <div class="conf" role="group" aria-label="확신도"><small class="muted">내 확신도</small>${[['sure', '확실해요'], ['half', '반반이에요'], ['unsure', '모르겠어요']].map(([k, l]) => `<button class="chip" data-c="${k}">${l}</button>`).join('')}</div>
       <textarea id="recall" rows="2" placeholder="답이나 핵심을 먼저 떠올려 적어 보세요 (선택)"></textarea>
       <button class="btn" id="reveal">정답 확인</button>
       <div class="row">${m.file_id ? `<a class="btn" href="#/f/${m.file_id}?p=${m.page || 1}">원본 열기</a>` : ''}
@@ -385,7 +411,9 @@ function drawReview() {
     <p class="muted center">얼마나 잘 기억났나요?</p>
     <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}"><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
   $('#mkai')?.addEventListener('click', () => explain(m));
+  $$('.conf .chip', rv).forEach((b) => b.addEventListener('click', () => { conf = b.dataset.c; $$('.conf .chip', rv).forEach((x) => x.classList.toggle('on', x === b)); }));
   $('#reveal')?.addEventListener('click', async () => {
+    const myQi = qi;
     const recall = $('#recall')?.value.trim();
     $('#ans').hidden = false; $('#reveal').hidden = true;
     const expected = m.ai?.answer || m.memo;
@@ -394,18 +422,30 @@ function drawReview() {
     try {
       const r = await ai('grade', { label: m.label, expected: String(expected).slice(0, 600), answer: recall.slice(0, 400) });
       fb.textContent = `🤖 ${r.feedback || ''}`;
+      if (qi !== myQi) return;
       const btn = $(`[data-r=${r.suggest}]`); if (btn) { btn.classList.add('suggest'); $('small', btn).textContent += ' · 추천'; }
     } catch { fb.remove(); }
   });
   $$('[data-r]', rv).forEach((b) => b.addEventListener('click', () => rate(b.dataset.r)));
 }
-let rating = false;
+function insightHtml() {
+  const wrong = sessionLog.filter((x) => x.c === 'sure' && (x.r === 'again' || x.r === 'hard')).length;
+  const under = sessionLog.filter((x) => x.c === 'unsure' && (x.r === 'good' || x.r === 'easy')).length;
+  const lines = [];
+  if (wrong) lines.push(`⚠️ <b>확신했는데 틀린 문제 ${wrong}개</b> — 가장 위험한 착각이에요. 해설을 다시 읽어 보세요.`);
+  if (under) lines.push(`💡 모른다고 했지만 맞힌 문제 ${under}개 — 생각보다 알고 있어요.`);
+  return lines.length ? `<div class="ai">${lines.map((l) => `<p>${l}</p>`).join('')}</div>` : '';
+}
+let rating = false, conf = null, sessionLog = [];
 async function rate(r) {
   const m = queue[qi]; if (!m || rating) return;
   rating = true;
   const p = plan(m, r);
-  const patch = p.graduated ? { graduated: true, stage: p.stage, last_result: r } : { stage: p.stage, next_review: p.next_review, last_result: r };
+  const entry = { d: today(), r, s: m.stage || 0, c: conf || null };
+  const hh = [...(m.hist || []), entry].slice(-30);
+  const patch = p.graduated ? { graduated: true, stage: p.stage, last_result: r, hist: hh } : { stage: p.stage, next_review: p.next_review, last_result: r, hist: hh };
   try { const n = await store.mistakes.update(m.id, patch); mistakes = mistakes.map((x) => (x.id === n.id ? n : x)); queue[qi] = n; } catch (e) { rating = false; return toast('저장 실패: ' + e.message); }
+  sessionLog.push({ r, c: conf }); conf = null;
   done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; drawReview();
 }
 addEventListener('keydown', (e) => {
@@ -470,11 +510,12 @@ async function quizView() {
     toast('AI 연결이 어려워 내 오답의 유사 문제로 퀴즈를 만들었어요', 4000);
   }
   qs = qs.filter((q) => Array.isArray(q.choices) && q.choices.length >= 2).map((q) => ({ ...q, answer: (String(q.answer || '').toUpperCase().match(/[A-D]/) || [''])[0] })).filter((q) => q.answer);
+  qs = qs.map(shuffleQ);
   if (!qs.length) return void ($('#qz').innerHTML = '<div class="empty"><div>⚠️</div><p>퀴즈를 만들지 못했어요. 잠시 후 다시 시도해 주세요.</p><a class="btn" href="#/mistakes">돌아가기</a></div>');
   let i = 0, score = 0;
   const draw = () => {
     const box = $('#qz'); if (!box) return;
-    if (i >= qs.length) { bump(); flag('quiz'); box.innerHTML = `<div class="empty"><div>${score >= qs.length * 0.8 ? '🏆' : '💪'}</div><h2>${score} / ${qs.length} 정답</h2><p class="muted">틀린 문제는 자동으로 오답노트에 담겼어요. 복습 일정에 들어가요.</p><div class="row" style="justify-content:center"><button class="btn" id="again">새 문제로 다시</button><a class="btn primary" href="#/mistakes">오답노트로</a></div></div>`; $('#again').onclick = quizView; return; }
+    if (i >= qs.length) { bump(); flag('quiz'); (S.quizLog ||= []).push({ d: today(), score, n: qs.length }); S.quizLog = S.quizLog.slice(-20); saveS(); box.innerHTML = `<div class="empty"><div>${score >= qs.length * 0.8 ? '🏆' : '💪'}</div><h2>${score} / ${qs.length} 정답</h2><p class="muted">틀린 문제는 자동으로 오답노트에 담겼어요. 복습 일정에 들어가요.</p><div class="row" style="justify-content:center"><button class="btn" id="again">새 문제로 다시</button><a class="btn primary" href="#/mistakes">오답노트로</a></div></div>`; $('#again').onclick = quizView; return; }
     const q = qs[i], L = ['A', 'B', 'C', 'D'];
     box.innerHTML = `<div class="prog"><div style="width:${(i / qs.length) * 100}%"></div></div><p class="muted">${i + 1} / ${qs.length}${q.target ? ` · 겨냥: ${esc(q.target)}` : ''}</p>
       <article class="card big"><h3 class="pre">${esc(q.question)}</h3><div class="choices">${(q.choices || []).map((c, k) => `<button class="choice" data-k="${L[k]}">${L[k]}. ${esc(c)}</button>`).join('')}</div><div id="fb"></div></article>`;
@@ -489,6 +530,12 @@ async function quizView() {
   draw();
 }
 
+function shuffleQ(q) {
+  const L = ['A', 'B', 'C', 'D'], right = q.choices[L.indexOf(q.answer)];
+  const ch = [...q.choices];
+  for (let i = ch.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ch[i], ch[j]] = [ch[j], ch[i]]; }
+  return { ...q, choices: ch, answer: L[ch.indexOf(right)] || q.answer };
+}
 function fallbackQuiz() {
   const out = [];
   for (const m of mistakes) for (const x of m.ai?.similar || []) {
@@ -536,14 +583,20 @@ async function exploreView() {
     <h3 class="sec">이렇게 써요</h3>
     <div class="scen">${SCENARIOS.map((s) => `<a class="card sc" href="${s.href}"><span class="te">${s.emoji}</span><div><b>${esc(s.title)}</b><p class="muted">${esc(s.body)}</p></div></a>`).join('')}</div>
 
+    <h3 class="sec">목표</h3>
+    <div class="row goal"><label>시험일 <input type="date" id="goaldate" value="${esc(S.goal?.date || '')}"></label><label>목표 점수 <input type="number" id="goaltarget" min="10" max="990" step="5" placeholder="예: 900" value="${esc(S.goal?.target || '')}"></label></div>
+
     <h3 class="sec">복습 주기</h3>
     <div class="chips" id="presets">${Object.entries(PRESETS).map(([k, p]) => `<button class="chip ${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? 'on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>`;
   $$('[data-tpl]').forEach((b) => (b.onclick = () => applyTemplate(TEMPLATES.find((t) => t.id === b.dataset.tpl))));
   $('#rmsample')?.addEventListener('click', removeSamples);
+  const setGoal = () => { S.goal = { date: $('#goaldate').value, target: $('#goaltarget').value }; saveS(); };
+  $('#goaldate')?.addEventListener('change', setGoal); $('#goaltarget')?.addEventListener('change', setGoal);
   $$('#presets .chip').forEach((c) => (c.onclick = () => { S.intervals = PRESETS[c.dataset.p].intervals; saveS(); toast('복습 주기를 바꿨어요'); exploreView(); }));
 }
 
 async function applyTemplate(t) {
+  $$('[data-tpl]').forEach((b) => { b.disabled = true; });
   const tk = toast(`${t.emoji} "${t.title}" 세팅을 만드는 중…`, 0);
   try {
     S.intervals = PRESETS[t.preset].intervals; S.reasons = t.reasons; S.cats = [...new Set([...(S.cats || []), ...t.cats])]; S.tpl = t.id;
@@ -552,7 +605,11 @@ async function applyTemplate(t) {
     for (const n of t.notes) {
       let row = files.find((f) => f.name === n.name);
       if (!row) {
-        row = await store.files.add(new File([n.content], n.name, { type: 'text/markdown' }));
+        let file;
+        if (n.sample === 'toeic5') file = new File([await makeSamplePdf('TOEIC Part 5 Practice (original sample)', ['1. The manager asked all employees to ______ the report before Friday.', '   (A) submit   (B) submitting   (C) submission   (D) submitted', '', '2. The company will ______ a new energy-saving policy next month.', '   (A) implement   (B) appoint   (C) attend   (D) reserve', '', '3. Ms. Park was ______ for her outstanding contribution to the project.', '   (A) recognize   (B) recognized   (C) recognition   (D) recognizing', '', '4. Please keep your receipt ______ you need to return the item.', '   (A) in case   (B) because of   (C) as well as   (D) whereas', '', '5. The new software is ______ faster than the previous version.', '   (A) significant   (B) significantly   (C) signify   (D) significance', '', 'Answers: 1 A / 2 A / 3 B / 4 A / 5 B'])], n.name, { type: 'application/pdf' });
+        else if (n.blank) file = new File([await makeNotePdf({ paper: n.blank, pages: 1 })], n.name, { type: 'application/pdf' });
+        else file = new File([n.content], n.name, { type: 'text/markdown' });
+        row = await store.files.add(file);
         row = await store.files.update(row, { category: n.category, tags: n.tags, summary: n.summary });
         files.unshift(row);
       }
@@ -567,7 +624,7 @@ async function applyTemplate(t) {
     await saveS(); tk.close();
     toast(`✅ 예시 학습 공간을 만들었어요. 오늘 복습할 카드 ${due().length}장이 있어요`, 4500);
     location.hash = '#/review';
-  } catch (e) { tk.close(); toast('세팅 실패: ' + e.message, 5000); }
+  } catch (e) { tk.close(); $$('[data-tpl]').forEach((b) => { b.disabled = false; }); toast('세팅 실패: ' + e.message, 5000); }
 }
 
 async function removeSamples() {

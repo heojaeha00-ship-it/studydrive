@@ -3,7 +3,7 @@ import { openDoc, toJpegB64 } from './pdf.js';
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#111827', '#f59e0b'];
 
-export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAppend }) {
+export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAppend, onCards, onAddCard }) {
   const type = kind(row.name, row.mime);
   const isPaged = type === 'pdf' || type === 'image';
   root.innerHTML = `
@@ -21,6 +21,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
         <button class="tool" data-a="zoomout" title="축소">－</button>
         <button class="tool" data-a="zoomin" title="확대">＋</button>
         <span class="pg" id="pg">1 / 1</span>
+        <button class="btn sm" data-a="cards" title="이 쪽으로 암기 카드 만들기">🃏 카드</button>
         <button class="btn sm" data-a="ask">💬 AI 질문</button>
         <button class="btn primary sm" data-a="mistake">오답 등록</button>
         <span class="saved" id="saved"></span>
@@ -75,7 +76,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   // ── PDF / 이미지 ──
   let ratio = 1.414, total = 1;
   if (type === 'pdf') {
-    doc = await openDoc(blob);
+    try { doc = await openDoc(blob); } catch (e) { pagesEl.innerHTML = `<p class="muted pad">이 브라우저에서는 PDF를 열 수 없어요. 최신 Chrome·Safari로 열어 주세요.</p>`; return { destroy() {}, capture: async () => null, page: () => 1 }; }
     total = doc.numPages;
     const v = (await doc.getPage(1)).getViewport({ scale: 1 });
     ratio = v.height / v.width;
@@ -251,10 +252,18 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       if (n && strokes[n]?.length) { strokes[n].pop(); redraw(objs[n - 1]); flash('저장 중…'); save(n, n); }
     }
     if (a === 'ask') { const p = $('.askp', root); p.hidden = !p.hidden; root.classList.toggle('asking', !p.hidden); $('#askpg', root).textContent = `${current}쪽 기준`; if (!p.hidden) $('#askin', root).focus(); }
+    if (a === 'cards') showCards();
     if (a === 'askclose') { $('.askp', root).hidden = true; root.classList.remove('asking'); }
     const q = e.target.closest('[data-q]')?.dataset.q; if (q) sendAsk(q);
     if (a === 'mistake') onMistake({ page: current, capture: () => capture(current) });
   });
+  async function showCards() {
+    const p = $('.askp', root); p.hidden = false; root.classList.add('asking');
+    const box = $('#askmsgs', root); box.innerHTML = '<p class="muted">카드를 만드는 중…</p>';
+    const cards = await onCards?.(await capture(current)) || [];
+    box.innerHTML = cards.length ? cards.map((c, i) => `<div class="msg a cardmsg"><b>${esc(c.front)}</b><br>${esc(c.back)}<br><button class="lnk" data-card="${i}">복습에 추가</button></div>`).join('') : '<p class="muted">카드를 만들지 못했어요.</p>';
+    $$('[data-card]', box).forEach((b) => (b.onclick = async () => { await onAddCard?.(cards[b.dataset.card], current); b.textContent = '추가됨 ✓'; b.disabled = true; }));
+  }
   const hist = [];
   async function sendAsk(q) {
     q = (q || '').trim(); if (!q) return;
