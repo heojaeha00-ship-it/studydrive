@@ -62,6 +62,10 @@ const ink = (p, sel = '.vpage .ov') => p.evaluate((s) => { const c = document.qu
   A.on('dialog', (d) => d.accept());
   const mm = A.locator('#mlist .m:has-text("동기화 시험 오답") [data-act=del]'); if (await mm.count()) await mm.first().click();
   await A.goto(BASE + '/#/files'); await A.waitForSelector('#grid');
-  const ff = A.locator(`.file:has-text("${NAME}") [data-act=del]`); if (await ff.count()) await ff.first().click();
+  // 노트는 휴지통으로 보낸 뒤 완전 삭제
+  await A.click('[data-tab=note]'); await A.waitForTimeout(300);
+  const tile = A.locator(`.tile.file:has-text("${NAME}")`);
+  if (await tile.count()) { await tile.first().locator('[data-act=menu]').click({ force: true }); await A.click('.sheet-i[data-do=trash]'); await A.waitForTimeout(500);
+    await A.click('[data-tab=trash]'); await A.waitForTimeout(400); await A.click(`.tile.file:has-text("${NAME}")`); await A.click('.sheet-i[data-do=purge]'); await A.waitForTimeout(800); }
   await b.close(); console.log(fails ? `\n${fails}개 실패` : '\n모두 통과'); process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

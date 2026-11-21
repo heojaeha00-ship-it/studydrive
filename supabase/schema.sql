@@ -109,3 +109,21 @@ create table if not exists public.ai_config (
 alter table public.ai_config enable row level security;
 create policy "ai_config read" on public.ai_config for select to authenticated using (true);
 insert into public.ai_config (id, models) values (1, array['gemini-3-flash-preview','gemini-flash-lite-latest','gemini-3.5-flash-lite','gemini-3.1-flash-lite']) on conflict (id) do nothing;
+
+-- 폴더(정리)와 파일의 폴더 지정
+create table if not exists public.folders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  name text not null,
+  parent_id uuid references public.folders(id) on delete set null,
+  emoji text default '📁',
+  device text,
+  created_at timestamptz default now()
+);
+alter table public.folders enable row level security;
+create policy "own folders" on public.folders for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+alter table public.files add column if not exists folder_id uuid references public.folders(id) on delete set null;
+alter table public.files add column if not exists device text;
+alter table public.mistakes add column if not exists device text;
+alter table public.annotations add column if not exists device text;
+alter publication supabase_realtime add table public.files, public.mistakes, public.annotations, public.folders;

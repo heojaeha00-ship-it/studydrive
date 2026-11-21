@@ -7,17 +7,18 @@ const ok = ({ data, error }) => {
 };
 
 export function cloud(cfg) {
+  let liveCh = null;
   const sb = createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } });
   const session = async () => (await sb.auth.getSession()).data.session;
 
   const files = {
     list: async () => ok(await sb.from('files').select('*').order('created_at', { ascending: false })),
-    async add(file) {
+    async add(file, extra = {}) {
       const uid = (await session()).user.id;
       const ext = (file.name.match(/\.([a-z0-9]{1,8})$/i)?.[1] || 'bin').toLowerCase();
       const path = `${uid}/${uuid()}.${ext}`;
       ok(await sb.storage.from('files').upload(path, file, { contentType: file.type || 'application/octet-stream' }));
-      return ok(await sb.from('files').insert({ name: file.name, path, mime: file.type || '', size: file.size, device: deviceInfo().label }).select().single());
+      return ok(await sb.from('files').insert({ name: file.name, path, mime: file.type || '', size: file.size, device: deviceInfo().label, ...extra }).select().single());
     },
     update: async (row, patch) => ok(await sb.from('files').update({ ...patch, device: deviceInfo().label, updated_at: new Date().toISOString() }).eq('id', row.id).select().single()),
     async remove(row) {
@@ -25,21 +26,35 @@ export function cloud(cfg) {
       ok(await sb.from('files').delete().eq('id', row.id));
     },
     async blob(row) { return ok(await sb.storage.from('files').download(row.path)); },
+    async copy(row, extra = {}) {
+      const uid = (await session()).user.id;
+      const ext = (row.path.match(/\.([a-z0-9]{1,8})$/i)?.[1] || 'bin').toLowerCase();
+      const path = `${uid}/${uuid()}.${ext}`;
+      ok(await sb.storage.from('files').copy(row.path, path));
+      const { id, created_at, updated_at, user_id, ...rest } = row;
+      const n = ok(await sb.from('files').insert({ ...rest, path, device: deviceInfo().label, ...extra }).select().single());
+      const sts = ok(await sb.from('strokes').select('page,data').eq('file_id', row.id));
+      if (sts.length) ok(await sb.from('strokes').insert(sts.map((x) => ({ id: uuid(), file_id: n.id, page: x.page, data: x.data }))));
+      return n;
+    },
     async replace(row, blob) {
       ok(await sb.storage.from('files').upload(row.path, blob, { upsert: true, cacheControl: '0', contentType: row.mime || 'text/plain' }));
       return files.update(row, { size: blob.size });
     },
   };
 
+  // 필기는 획(stroke) 하나가 한 줄(row): 두 기기가 같은 쪽에 동시에 써도 서로 덮어쓰지 않는다
   const ann = {
     async get(fileId) {
       const out = {};
-      for (const a of ok(await sb.from('annotations').select('page,strokes').eq('file_id', fileId))) out[a.page] = a.strokes;
+      for (const r of ok(await sb.from('strokes').select('id,page,data').eq('file_id', fileId).order('created_at', { ascending: true }))) (out[r.page] ||= []).push({ ...r.data, id: r.id });
       return out;
     },
-    async save(fileId, page, strokes) {
-      ok(await sb.from('annotations').upsert({ file_id: fileId, page, strokes, device: deviceInfo().label, updated_at: new Date().toISOString() }, { onConflict: 'file_id,page' }));
+    async add(fileId, page, st) {
+      const { id, ...data } = st;
+      ok(await sb.from('strokes').insert({ id, file_id: fileId, page, data, device: deviceInfo().label }));
     },
+    async remove(ids) { if (ids.length) ok(await sb.from('strokes').delete().in('id', ids)); },
   };
 
   const mistakes = {
@@ -72,19 +87,23 @@ export function cloud(cfg) {
         try { ok(await sb.auth.refreshSession({ refresh_token: decodeURIComponent(m[1]) })); return true; } catch { return false; }
       },
     },
-    files, ann, mistakes,
+    files, ann, mistakes, folders,
+    // 그리는 중인 획·메모 글자를 다른 기기에 바로 전달(저장 전 미리보기)
+    live(payload) { liveCh?.send({ type: 'broadcast', event: 'live', payload: { ...payload, from: deviceInfo().id } }); },
     // 실시간 동기화 + 연결된 기기(접속 상태) 공유
     async realtime(h) {
       const ses = await session(); if (!ses) return () => {};
       const dev = deviceInfo(), uid = ses.user.id;
-      const ch = sb.channel(`sd-${uid}`, { config: { presence: { key: dev.id } } });
-      for (const table of ['files', 'mistakes', 'annotations']) ch.on('postgres_changes', { event: '*', schema: 'public', table }, (p) => h.change?.(table, p));
+      const ch = sb.channel(`sd-${uid}`, { config: { presence: { key: dev.id }, broadcast: { self: false } } });
+      liveCh = ch;
+      ch.on('broadcast', { event: 'live' }, ({ payload }) => h.live?.(payload));
+      for (const table of ['files', 'mistakes', 'strokes', 'folders']) ch.on('postgres_changes', { event: '*', schema: 'public', table }, (p) => h.change?.(table, p));
       ch.on('presence', { event: 'sync' }, () => h.presence?.(Object.values(ch.presenceState()).flat()));
       ch.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') { h.status?.('online'); await ch.track({ id: dev.id, kind: dev.kind, label: dev.label, icon: dev.icon, at: Date.now() }); }
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') h.status?.('offline');
       });
-      return () => { sb.removeChannel(ch); };
+      return () => { liveCh = null; sb.removeChannel(ch); };
     },
     settings: {
       async get() { const d = ok(await sb.from('profiles').select('data').maybeSingle()); return d?.data || {}; },

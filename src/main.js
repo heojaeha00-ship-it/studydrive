@@ -41,7 +41,7 @@ function growthHtml() {
   return parts.length ? `<div class="growth card"><b>📈 나의 성장</b>${parts.join('')}</div>` : '';
 }
 const due = () => mistakes.filter((m) => !m.graduated && m.next_review <= today());
-const steps = () => [files.length > 0, !!S.flags.draw, mistakes.length > 0, mistakes.some((m) => m.last_result)];
+const steps = () => [files.some((f) => !f.deleted_at), !!S.flags.draw, mistakes.length > 0, mistakes.some((m) => m.last_result)];
 const STEP_LABEL = ['파일 올리기', '필기해 보기', '오답 등록', '복습 1회'];
 const reasonsAll = () => [...new Set([...S.reasons, ...mistakes.map((m) => m.reason).filter(Boolean)])];
 
@@ -75,21 +75,23 @@ function startSync() {
     presence: (list) => { const had = new Set(syncState.devices.map((d) => d.id)); syncState.devices = list; renderSync();
       list.filter((d) => !had.has(d.id) && d.id !== deviceInfo().id && had.size).forEach((d) => toast(`${d.icon} ${d.label}이(가) 연결됐어요`, 3000)); },
     change: onRemote,
+    live: (pl) => viewer?.live?.(pl),
   }).then((stop) => { stopRealtime = stop; });
 }
 function onRemote(table, p) {
   const ev = p.eventType, rec = p.new && p.new.id !== undefined || p.new?.file_id ? p.new : null, old = p.old || {};
   const mine = Date.now() - lastLocal < 2500;
   const dev = rec?.device;
-  if (table === 'annotations') {
-    if (!rec || mine) return;
-    viewer?.remote?.(rec.file_id, rec.page, rec.strokes, dev);
-    if (Date.now() - lastAnnToast > 8000) { lastAnnToast = Date.now(); renderSync(`${dev || '다른 기기'}에서 필기 중`); setTimeout(() => renderSync(), 2200); }
+  if (table === 'strokes') {
+    if (ev === 'DELETE') viewer?.remoteDel?.(old.id);
+    else if (rec) viewer?.remoteAdd?.(rec.file_id, rec.page, { ...rec.data, id: rec.id }, rec.device);
+    if (!mine && rec && Date.now() - lastAnnToast > 8000) { lastAnnToast = Date.now(); renderSync(`${dev || '다른 기기'}에서 필기 중`); setTimeout(() => renderSync(), 2200); }
     return;
   }
-  const arr = table === 'files' ? files : mistakes;
+  const arr = table === 'files' ? files : table === 'folders' ? folders : mistakes;
   if (ev === 'DELETE') { const i = arr.findIndex((x) => x.id === old.id); if (i >= 0) arr.splice(i, 1); }
   else if (rec) { const i = arr.findIndex((x) => x.id === rec.id); if (i >= 0) arr[i] = { ...arr[i], ...rec }; else arr.unshift(rec); }
+  if (table === 'folders' && $('#grid')) drawFiles();
   if (table === 'files' && $('#grid')) { drawFiles(); rec && $(`.file[data-id="${rec.id}"]`)?.classList.add('flash'); }
   if (table === 'mistakes') { badge(); if ($('#mlist')) drawMistakes(); if ($('#grid')) drawFiles(); }
   if (!mine && ev === 'INSERT' && rec) {
@@ -244,31 +246,79 @@ function authView() {
   });
 }
 
-// ───────── 내 파일 ─────────
+// ───────── 내 파일 (홈 화면처럼 정리: 폴더·드래그·휴지통) ─────────
+let folders = [];
+const lsGet = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const FV = { tab: lsGet('sd-tab', 'doc'), folder: null, sort: lsGet('sd-sort', 'new'), layout: lsGet('sd-layout', 'icons'), sel: new Set(), selecting: false };
+const TABS = [['doc', '📚', '자료'], ['note', '✍️', '노트'], ['memo', '📝', '메모'], ['trash', '🗑', '휴지통']];
+const TRASH_DAYS = 7;
+const FEMOJI = ['📁', '📂', '📘', '📗', '📙', '📕', '⭐', '🎯', '🚢', '⚓', '🧠', '✏️', '🔥', '💡', '🎧', '🗓️', '🧪', '🏆', '🌱', '🌙'];
+const alive = (f) => !f.deleted_at;
+const tabOf = (f) => (kind(f.name, f.mime) === 'text' ? 'memo' : (f.tags || []).includes('노트') ? 'note' : 'doc');
+const TILE = { pdf: ['#ff8787', '#f03e3e', 'PDF'], image: ['#69db7c', '#2f9e44', 'IMG'], note: ['#74c0fc', '#3451c7', '✍'], memo: ['#ffe066', '#f59f00', 'MD'] };
+const tileKind = (f) => { const k = kind(f.name, f.mime); return k === 'text' ? 'memo' : (f.tags || []).includes('노트') ? 'note' : k === 'image' ? 'image' : 'pdf'; };
+const kids = (pid) => folders.filter((x) => (x.parent_id || null) === (pid || null)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+const pathOf = (id) => { const out = []; let c = folders.find((x) => x.id === id), g = 0; while (c && g++ < 24) { out.unshift(c); c = folders.find((x) => x.id === c.parent_id); } return out; };
+const descOf = (id) => { const out = new Set([id]); let ch = true; while (ch) { ch = false; for (const f of folders) if (f.parent_id && out.has(f.parent_id) && !out.has(f.id)) { out.add(f.id); ch = true; } } return out; };
+const inFolder = (f) => (f.folder_id || null) === (FV.folder || null);
+const sorters = { new: (a, b) => String(b.created_at).localeCompare(String(a.created_at)), name: (a, b) => a.name.localeCompare(b.name, 'ko'), size: (a, b) => (b.size || 0) - (a.size || 0) };
+const sizeTxt = (n) => (n < 1048576 ? Math.max(1, Math.round((n || 0) / 1024)) + 'KB' : (n / 1048576).toFixed(1) + 'MB');
+const dispName = (f) => f.name.replace(/\.(md|txt)$/i, '');
+const daysLeft = (f) => Math.max(0, TRASH_DAYS - Math.floor((Date.now() - new Date(f.deleted_at)) / 864e5));
+const itemsIn = (id) => files.filter((f) => alive(f) && f.folder_id === id).length + folders.filter((x) => x.parent_id === id).length;
+
 async function filesView() {
   view.innerHTML = `
     <header class="vh"><h2>내 파일</h2>
-      <div class="row">
-        <input id="q" type="search" placeholder="🔍 검색" value="${esc(filter.q)}">
-        <button class="btn" id="newnote">📝 새 노트</button>
-        <label class="btn primary">＋ 업로드<input id="up" type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md"></label>
+      <div class="row tools">
+        <input id="q" type="search" placeholder="🔍 검색" value="${esc(filter.q)}" aria-label="검색">
+        <button class="btn icon" id="selmode" title="여러 개 선택" aria-label="여러 개 선택">${ico('check', 18)}</button>
+        <button class="btn icon" id="layout" title="보기 전환" aria-label="보기 전환">${ico(FV.layout === 'icons' ? 'list' : 'grid', 18)}</button>
+        <select id="sort" aria-label="정렬"><option value="new">최신순</option><option value="name">이름순</option><option value="size">크기순</option></select>
       </div>
     </header>
-    <div id="stats"></div><div id="banner"></div><div id="chips" class="chips"></div><div id="grid" class="grid"></div>
+    <div class="row actions">
+      <label class="btn primary">＋ 업로드<input id="up" type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md"></label>
+      <button class="btn" id="newfolder">${ico('folderplus', 18)} 새 폴더</button>
+      <button class="btn" id="newnote">📝 새 노트</button>
+      <button class="btn" id="newmemo">＋ 새 메모</button>
+    </div>
+    <div id="stats"></div><div id="banner"></div>
+    <div id="tabs" class="tabs" role="tablist"></div>
+    <nav id="crumbs" class="crumbs" aria-label="폴더 경로"></nav>
+    <div id="chips" class="chips"></div>
+    <div id="trashbar" class="trashbar" hidden></div>
+    <div id="grid" class="grid tiles"></div>
+    <div id="selbar" class="selbar" hidden></div>
     <div id="drop" class="drop">여기에 놓아서 업로드</div>`;
-  $('#grid').innerHTML = Array.from({ length: 6 }, () => '<div class="card skel"><i></i><i></i><i></i></div>').join('');
-  try { [files, mistakes] = await Promise.all([store.files.list(), store.mistakes.list()]); } catch (e) { return void ($('#grid').innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`); }
+  $('#sort').value = FV.sort;
+  $('#grid').innerHTML = Array.from({ length: 8 }, () => '<div class="tile skel"><div class="ticon"></div><i></i></div>').join('');
+  try { [files, folders, mistakes] = await Promise.all([store.files.list(), store.folders.list(), store.mistakes.list()]); } catch (e) { return void ($('#grid').innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`); }
   if (!S.seen) { S.seen = true; saveS(); if (!files.length) { location.hash = '#/explore'; return; } }
+  await purgeOldTrash();
   badge();
-  drawFiles();
+  FV.sel.clear(); FV.selecting = false;
+  drawFiles(true);
   $('#q').addEventListener('input', (e) => { filter.q = e.target.value; drawFiles(); });
+  $('#sort').addEventListener('change', (e) => { FV.sort = e.target.value; lsSet('sd-sort', FV.sort); drawFiles(); });
+  $('#layout').addEventListener('click', () => { FV.layout = FV.layout === 'icons' ? 'list' : 'icons'; lsSet('sd-layout', FV.layout); $('#layout').innerHTML = ico(FV.layout === 'icons' ? 'list' : 'grid', 18); drawFiles(); });
+  $('#selmode').addEventListener('click', () => { FV.selecting = !FV.selecting; if (!FV.selecting) FV.sel.clear(); drawFiles(); });
+  $('#newfolder').addEventListener('click', createFolderDialog);
   $('#newnote').addEventListener('click', noteDialog);
+  $('#newmemo').addEventListener('click', newMemoDialog);
   $('#up').addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });
   if (!filesView.bound) {
     filesView.bound = true;
-    addEventListener('dragover', (e) => { if ($('#grid')) { e.preventDefault(); $('#drop')?.classList.add('on'); } });
+    addEventListener('dragover', (e) => { if ($('#grid') && !DND.on && e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); $('#drop')?.classList.add('on'); } });
     addEventListener('dragleave', (e) => { if (!e.relatedTarget) $('#drop')?.classList.remove('on'); });
-    addEventListener('drop', (e) => { if ($('#grid')) { e.preventDefault(); $('#drop')?.classList.remove('on'); handleFiles([...e.dataTransfer.files]); } });
+    addEventListener('drop', (e) => { if ($('#grid') && e.dataTransfer?.files?.length) { e.preventDefault(); $('#drop')?.classList.remove('on'); handleFiles([...e.dataTransfer.files]); } });
+    view.addEventListener('pointerdown', dndDown);
+    addEventListener('pointermove', dndMove);
+    addEventListener('pointerup', () => dndEnd(false));
+    addEventListener('pointercancel', () => dndEnd(true));
+    addEventListener('touchmove', (e) => { if (DND.on) e.preventDefault(); }, { passive: false });
+    addEventListener('contextmenu', (e) => { if (DND.on || e.target.closest?.('.tile')) e.preventDefault(); });
   }
 }
 
@@ -283,53 +333,345 @@ function statsHtml() {
   </section>${store.mode === 'cloud' ? `<div class="quota" title="사용자당 저장 한도"><div><i style="width:${Math.min(100, (usedBytes() / QUOTA) * 100)}%"></i></div><small>저장공간 ${mb(usedBytes())} / ${mb(QUOTA)}</small></div>` : ''}`;
 }
 
-function drawFiles() {
-  const cats = [...new Set([...(S.cats || []), ...files.map((f) => f.category || '미분류')])];
+const tileIcon = (f) => { const [a, b, t] = TILE[tileKind(f)]; return `<div class="ticon" style="--g1:${a};--g2:${b}"><b>${t}</b></div>`; };
+
+function fileTile(f, trash) {
+  const sel = FV.sel.has(f.id);
+  return `<article class="tile file${sel ? ' sel' : ''}" data-id="${f.id}">
+    ${FV.selecting ? `<label class="chk"><input type="checkbox" data-sel ${sel ? 'checked' : ''} aria-label="선택"></label>` : ''}
+    ${tileIcon(f)}
+    ${trash ? `<span class="tbadge">${daysLeft(f)}일 뒤 삭제</span>` : ''}
+    <h3 class="tname">${esc(dispName(f))}</h3>
+    <div class="tmeta">${classifying.has(f.id) ? '<span class="badge busy">AI 분류 중…</span>' : `<span class="badge" data-act="cat">${esc(f.category || '미분류')}</span>`}${(f.tags || []).filter((t) => t !== '노트').slice(0, 2).map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}<small>${fmtDate(f.created_at)} · ${sizeTxt(f.size)}</small></div>
+    <button class="more" data-act="menu" aria-label="더 보기">${ico('more', 18)}</button>
+  </article>`;
+}
+function folderTile(f) {
+  const inner = [...files.filter((x) => alive(x) && x.folder_id === f.id), ...folders.filter((x) => x.parent_id === f.id)].slice(0, 4);
+  const mini = inner.map((x) => (x.deleted_at !== undefined || x.mime !== undefined ? (() => { const [a, b] = TILE[tileKind(x)]; return `<i style="--g1:${a};--g2:${b}"></i>`; })() : '<i style="--g1:#74c0fc;--g2:#3451c7"></i>')).join('');
+  return `<article class="tile folder" data-fid="${f.id}">
+    <div class="ticon folderi"><span class="femo">${esc(f.emoji || '📁')}</span><div class="fprev">${mini}</div></div>
+    <h3 class="tname">${esc(f.name)}</h3>
+    <div class="tmeta"><small>${itemsIn(f.id)}개 항목</small></div>
+    <button class="more" data-act="fmenu" aria-label="폴더 메뉴">${ico('more', 18)}</button>
+  </article>`;
+}
+
+function drawFiles(anim) {
+  const grid = $('#grid'); if (!grid) return;
+  if (FV.folder && !folders.some((x) => x.id === FV.folder)) FV.folder = null;
+  const liveFiles = files.filter(alive), trashed = files.filter((f) => f.deleted_at);
+  const cats = [...new Set([...(S.cats || []), ...liveFiles.map((f) => f.category || '미분류')])];
   if (filter.cat !== '전체' && !cats.includes(filter.cat)) filter.cat = '전체';
+  const q = filter.q.trim().toLowerCase(), searching = !!q, trash = FV.tab === 'trash' && !searching;
+
   $('#stats').innerHTML = statsHtml() + growthHtml();
   $$('#stats [data-count]').forEach((el) => countUp(el, +el.dataset.count));
   const st = steps(), dn = st.filter(Boolean).length;
   $('#banner').innerHTML = dn < 4 ? `<a class="banner" href="#/explore">🚀 시작 가이드 ${dn}/4 · 다음: <b>${STEP_LABEL[st.indexOf(false)]}</b> (둘러보기에서 시작)</a>` : '';
-  $('#chips').innerHTML = ['전체', ...cats].map((c) => `<button class="chip${filter.cat === c ? ' on' : ''}" data-c="${esc(c)}">${esc(c)} <small>${c === '전체' ? files.length : files.filter((f) => (f.category || '미분류') === c).length}</small></button>`).join('');
-  const q = filter.q.trim().toLowerCase();
-  const list = files.filter((f) => (filter.cat === '전체' || (f.category || '미분류') === filter.cat) && (!q || `${f.name} ${f.category} ${(f.tags || []).join(' ')} ${f.summary || ''}`.toLowerCase().includes(q)));
-  $('#grid').innerHTML = list.length ? list.map((f) => `
-    <article class="card file" data-id="${f.id}">
-      <div class="fi">${ICON[kind(f.name, f.mime)]}</div>
-      <div class="fb">
-        <h3>${esc(f.name.replace(/\.(md|txt)$/i, ''))}</h3>
-        <div class="meta">${classifying.has(f.id) ? '<span class="badge busy">AI 분류 중…</span>' : `<span class="badge" data-act="cat">${esc(f.category || '미분류')}</span>`}${(f.tags || []).map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
-        ${f.summary ? `<p class="sum">${esc(f.summary)}</p>` : ''}
-        <div class="foot"><small>${fmtDate(f.created_at)} · ${f.size < 1048576 ? Math.max(1, Math.round(f.size / 1024)) + 'KB' : (f.size / 1048576).toFixed(1) + 'MB'}</small>
-          <span><button class="lnk" data-act="reclass">자동 분류</button><button class="lnk" data-act="rename">이름 바꾸기</button><button class="lnk danger" data-act="del">삭제</button></span></div>
-      </div>
-    </article>`).join('') : `<div class="empty"><div>📂</div><p>${files.length ? '검색 결과가 없어요' : '아직 파일이 없어요.<br>PDF나 노트를 올리면 AI가 알아서 분류해 줘요.'}</p>${files.length ? '' : '<a class="btn primary" href="#/explore">🧭 원클릭으로 시작하기</a>'}</div>`;
+
+  const cnt = (k) => (k === 'trash' ? trashed.length : liveFiles.filter((f) => tabOf(f) === k && (searching || inFolder(f))).length);
+  $('#tabs').innerHTML = TABS.map(([k, i, l]) => `<button class="tabb${FV.tab === k ? ' on' : ''}${k === 'trash' ? ' trashtab' : ''}" data-tab="${k}" role="tab" aria-selected="${FV.tab === k}">${i} ${l} <small>${cnt(k)}</small></button>`).join('');
+  $('#newnote').hidden = FV.tab === 'memo' || trash; $('#newmemo').hidden = FV.tab !== 'memo'; $('#newfolder').hidden = trash;
+  document.querySelector('.actions label.btn').hidden = trash;
+
+  const crumbs = $('#crumbs');
+  crumbs.hidden = searching || trash;
+  crumbs.innerHTML = `<button class="crumb" data-fid="">🏠 내 파일</button>${pathOf(FV.folder).map((f) => `<span>›</span><button class="crumb" data-fid="${f.id}">${esc(f.emoji || '📁')} ${esc(f.name)}</button>`).join('')}`;
+
+  $('#chips').hidden = trash;
+  $('#chips').innerHTML = ['전체', ...cats].map((c) => `<button class="chip${filter.cat === c ? ' on' : ''}" data-c="${esc(c)}">${esc(c)} <small>${c === '전체' ? liveFiles.length : liveFiles.filter((f) => (f.category || '미분류') === c).length}</small></button>`).join('') + '<button class="chip add" id="addcat" title="카테고리 관리">＋</button>';
+
+  const tb = $('#trashbar'); tb.hidden = !trash;
+  tb.innerHTML = trash ? `<div class="tb-note"><b>🗑 휴지통</b><small>삭제한 파일은 ${TRASH_DAYS}일 동안 여기에 보관돼요. 그 사이에는 언제든 복원할 수 있고, ${TRASH_DAYS}일이 지나면 자동으로 완전히 삭제돼요.</small></div>${trashed.length ? `<div class="row"><button class="btn sm" data-tb="restoreall">모두 복원</button><button class="btn sm danger-b" data-tb="empty">휴지통 비우기</button></div>` : ''}` : '';
+
+  grid.className = `grid tiles ${FV.layout === 'list' ? 'list' : 'icons'}${anim ? '' : ' static'}${FV.selecting ? ' selecting' : ''}`;
+  let list, fl = [];
+  if (trash) list = trashed;
+  else if (searching) { list = liveFiles.filter((f) => `${f.name} ${f.category} ${(f.tags || []).join(' ')} ${f.summary || ''}`.toLowerCase().includes(q)); fl = folders.filter((f) => f.name.toLowerCase().includes(q)); }
+  else { list = liveFiles.filter((f) => inFolder(f) && tabOf(f) === FV.tab && (filter.cat === '전체' || (f.category || '미분류') === filter.cat)); fl = kids(FV.folder); }
+  list = [...list].sort(sorters[FV.sort]);
+  const html = fl.map(folderTile).join('') + list.map((f) => fileTile(f, trash)).join('');
+  const empty = {
+    doc: ['📚', 'PDF나 사진을 올려 보세요', 'AI가 알아서 분류해 줘요. 끌어서 폴더로 옮길 수도 있어요.', '<a class="btn primary" href="#/explore">🧭 원클릭으로 시작하기</a>'],
+    note: ['✍️', '빈 노트를 만들어 필기해 보세요', '백지·줄·모눈·점·코넬 노트를 고를 수 있어요.', ''],
+    memo: ['📝', '메모(.md·.txt)는 여기에 따로 모여요', '글을 쓰면 다른 기기에서도 실시간으로 같이 편집돼요.', ''],
+    trash: ['🗑', '휴지통이 비어 있어요', `삭제한 파일은 ${TRASH_DAYS}일 동안 여기서 복원할 수 있어요.`, ''],
+  }[searching ? 'doc' : FV.tab];
+  grid.innerHTML = html || (searching ? '<div class="empty"><div>🔍</div><p>검색 결과가 없어요</p></div>' : `<div class="empty"><div>${empty[0]}</div><h3>${empty[1]}</h3><p>${empty[2]}</p>${empty[3]}</div>`);
+  updateSelUI();
+}
+function updateSelUI() {
+  const bar = $('#selbar'); if (!bar) return;
+  $$('.tile.file').forEach((t) => { const on = FV.sel.has(t.dataset.id); t.classList.toggle('sel', on); const c = $('input[data-sel]', t); if (c) c.checked = on; });
+  bar.hidden = !FV.sel.size;
+  bar.innerHTML = FV.sel.size ? (FV.tab === 'trash'
+    ? `<b>${FV.sel.size}개 선택</b><button data-sb="restore">복원</button><button data-sb="purge" class="danger">영구 삭제</button><button data-sb="clear">해제</button>`
+    : `<b>${FV.sel.size}개 선택</b><button data-sb="move">이동</button><button data-sb="copy">복사</button><button data-sb="cat">카테고리</button><button data-sb="del" class="danger">삭제</button><button data-sb="all">전체 선택</button><button data-sb="clear">해제</button>`) : '';
 }
 
+// ── 공용 대화상자 ──
+function sheet(title, items) {
+  return new Promise((res) => {
+    const d = $('#dlg'); d.className = 'sheet';
+    d.innerHTML = `<div class="dlg-body"><h3>${esc(title)}</h3><div class="sheet-list">${items.map((i) => `<button class="sheet-i${i.danger ? ' danger' : ''}" data-do="${i.id}"><span>${i.icon || ''}</span>${esc(i.label)}</button>`).join('')}</div><button class="btn ghost" data-x>닫기</button></div>`;
+    let done = false; const fin = (v) => { if (done) return; done = true; d.className = ''; d.close(); res(v); };
+    d.showModal(); $$('[data-do]', d).forEach((b) => (b.onclick = () => fin(b.dataset.do))); $('[data-x]', d).onclick = () => fin(null); d.onclose = () => fin(null);
+  });
+}
+function askText({ title, label, value = '', ok = '확인', emojis = false, emoji = '📁', placeholder = '', max = 40 }) {
+  return new Promise((res) => {
+    const d = $('#dlg'); d.className = '';
+    d.innerHTML = `<form class="dlg-body"><h3>${esc(title)}</h3>
+      <label>${esc(label)}<input name="v" value="${esc(value)}" maxlength="${max}" placeholder="${esc(placeholder)}" required autocomplete="off"></label>
+      ${emojis ? `<div class="emojis">${FEMOJI.map((e) => `<button type="button" class="emo${e === emoji ? ' on' : ''}" data-e="${e}" aria-label="아이콘 ${e}">${e}</button>`).join('')}</div>` : ''}
+      <div class="row end"><button type="button" class="btn ghost" data-x>취소</button><button class="btn primary">${esc(ok)}</button></div></form>`;
+    let em = emoji, done = false; const fin = (v) => { if (done) return; done = true; d.close(); res(v); };
+    d.showModal(); const f = $('form', d); f.v.focus(); f.v.select();
+    $$('.emo', d).forEach((b) => (b.onclick = () => { em = b.dataset.e; $$('.emo', d).forEach((x) => x.classList.toggle('on', x === b)); }));
+    $('[data-x]', d).onclick = () => fin(null); d.onclose = () => fin(null);
+    f.onsubmit = (e) => { e.preventDefault(); const v = f.v.value.trim(); if (v) fin(emojis ? { name: v, emoji: em } : v); };
+  });
+}
+function pickFolder({ title = '폴더 선택', exclude = new Set(), current } = {}) {
+  return new Promise((res) => {
+    const d = $('#dlg'); d.className = '';
+    const rows = (pid, depth) => kids(pid).filter((f) => !exclude.has(f.id)).map((f) => `<button class="pf${f.id === current ? ' cur' : ''}" style="--d:${depth}" data-f="${f.id}">${esc(f.emoji || '📁')} ${esc(f.name)}</button>${rows(f.id, depth + 1)}`).join('');
+    d.innerHTML = `<div class="dlg-body"><h3>${esc(title)}</h3><div class="pflist"><button class="pf${current === null ? ' cur' : ''}" data-f="">🏠 내 파일 (맨 위)</button>${rows(null, 1)}</div><div class="row end"><button class="btn ghost" data-x>취소</button><button class="btn" id="pfnew">${ico('folderplus', 16)} 새 폴더</button></div></div>`;
+    let done = false; const fin = (v) => { if (done) return; done = true; d.close(); res(v); };
+    d.showModal(); $$('.pf', d).forEach((b) => (b.onclick = () => fin(b.dataset.f || null))); $('[data-x]', d).onclick = () => fin(undefined); d.onclose = () => fin(undefined);
+    $('#pfnew', d).onclick = async () => { done = true; d.close(); const r = await askText({ title: '새 폴더', label: '폴더 이름', emojis: true }); if (r) { const f = await store.folders.add({ name: r.name, emoji: r.emoji, parent_id: null }); folders.push(f); } res(await pickFolder({ title, exclude, current })); };
+  });
+}
+
+// ── 폴더 ──
+async function createFolderDialog() {
+  const r = await askText({ title: '새 폴더', label: '폴더 이름', emojis: true, placeholder: '예: 토익 Part5' });
+  if (!r) return;
+  try { const f = await store.folders.add({ name: r.name, emoji: r.emoji, parent_id: FV.folder }); folders.push(f); drawFiles(); toast('폴더를 만들었어요'); } catch (e) { toast('폴더 만들기 실패: ' + e.message); }
+}
+async function folderMenu(id) {
+  const f = folders.find((x) => x.id === id); if (!f) return;
+  const act = await sheet(`${f.emoji || '📁'} ${f.name}`, [{ id: 'open', icon: '📂', label: '열기' }, { id: 'rename', icon: '✏️', label: '이름·아이콘 바꾸기' }, { id: 'move', icon: '📦', label: '다른 폴더로 이동' }, { id: 'del', icon: '🗑', label: '폴더 삭제 (안의 파일은 위로 올라가요)', danger: true }]);
+  if (act === 'open') { FV.folder = id; drawFiles(); }
+  if (act === 'rename') { const r = await askText({ title: '폴더 이름·아이콘', label: '폴더 이름', value: f.name, emojis: true, emoji: f.emoji || '📁' }); if (r) { Object.assign(f, await store.folders.update(id, { name: r.name, emoji: r.emoji })); drawFiles(); } }
+  if (act === 'move') { const to = await pickFolder({ title: '이동할 폴더', exclude: descOf(id), current: f.parent_id || null }); if (to !== undefined) await moveFolderTo(id, to); }
+  if (act === 'del') await deleteFolder(id);
+}
+async function moveFolderTo(id, to) {
+  const f = folders.find((x) => x.id === id); if (!f || (f.parent_id || null) === (to || null) || (to && descOf(id).has(to))) return;
+  Object.assign(f, await store.folders.update(id, { parent_id: to || null })); drawFiles(); toast('폴더를 옮겼어요');
+}
+async function deleteFolder(id) {
+  const f = folders.find((x) => x.id === id); if (!f) return;
+  if (!confirm(`'${f.name}' 폴더를 삭제할까요? 안의 파일과 폴더는 상위로 옮겨져요.`)) return;
+  try {
+    for (const x of files.filter((x) => x.folder_id === id)) await update(x, { folder_id: f.parent_id || null }, true);
+    for (const x of folders.filter((x) => x.parent_id === id)) Object.assign(x, await store.folders.update(x.id, { parent_id: f.parent_id || null }));
+    await store.folders.remove(id); folders = folders.filter((x) => x.id !== id); drawFiles(); toast('폴더를 삭제했어요');
+  } catch (e) { toast('삭제 실패: ' + e.message); }
+}
+async function mergeToFolder(targetId, movingIds) {
+  try {
+    const f = await store.folders.add({ name: '새 폴더', emoji: '📁', parent_id: FV.folder }); folders.push(f);
+    for (const id of [targetId, ...movingIds]) { const r = files.find((x) => x.id === id); if (r) await update(r, { folder_id: f.id }, true); }
+    drawFiles(); navigator.vibrate?.(30);
+    const r = await askText({ title: '폴더가 만들어졌어요', label: '폴더 이름', value: '새 폴더', emojis: true, ok: '저장' });
+    if (r) { Object.assign(f, await store.folders.update(f.id, { name: r.name, emoji: r.emoji })); drawFiles(); }
+  } catch (e) { toast('폴더 만들기 실패: ' + e.message); }
+}
+
+// ── 파일 작업 ──
+const idsFor = (id) => (FV.sel.size && FV.sel.has(id) ? [...FV.sel] : [id]);
+async function moveFilesTo(ids, to) {
+  let n = 0; for (const id of ids) { const r = files.find((x) => x.id === id); if (r && (r.folder_id || null) !== (to || null)) { await update(r, { folder_id: to || null }, true); n++; } }
+  FV.sel.clear(); drawFiles(); if (n) toast(`${n}개를 ${to ? `'${folders.find((x) => x.id === to)?.name}' 폴더로` : '맨 위로'} 옮겼어요`);
+}
+async function copyFilesTo(ids, to) {
+  let n = 0;
+  for (const id of ids) {
+    const r = files.find((x) => x.id === id); if (!r) continue;
+    if (store.mode === 'cloud' && usedBytes() + (r.size || 0) > QUOTA) { toast('저장공간이 부족해서 복사하지 못했어요'); break; }
+    const nm = r.name.replace(/(\.[^.]+)?$/, ' (사본)$1');
+    try { const c = await store.files.copy(r, { folder_id: to || null, name: nm }); files.unshift(c); n++; } catch (e) { toast('복사 실패: ' + e.message); break; }
+  }
+  FV.sel.clear(); drawFiles(); if (n) toast(`${n}개를 복사했어요`);
+}
+async function trashFiles(ids) {
+  const rows = ids.map((id) => files.find((x) => x.id === id)).filter(Boolean); if (!rows.length) return;
+  const at = new Date().toISOString();
+  for (const r of rows) await update(r, { deleted_at: at }, true);
+  FV.sel.clear(); drawFiles();
+  toast(`${rows.length}개를 휴지통으로 옮겼어요`, 7000, { label: '되돌리기', fn: () => restoreFiles(rows.map((r) => r.id)) });
+}
+async function restoreFiles(ids) {
+  for (const id of ids) { const r = files.find((x) => x.id === id); if (r) await update(r, { deleted_at: null, ...(r.folder_id && !folders.some((f) => f.id === r.folder_id) ? { folder_id: null } : {}) }, true); }
+  FV.sel.clear(); drawFiles(); toast(`${ids.length}개를 복원했어요`);
+}
+async function purgeFiles(ids, ask = true) {
+  const rows = ids.map((id) => files.find((x) => x.id === id)).filter(Boolean); if (!rows.length) return;
+  if (ask && !confirm(`${rows.length}개를 완전히 삭제할까요? 필기도 함께 지워지고 되돌릴 수 없어요.`)) return;
+  for (const r of rows) { try { await store.files.remove(r); files = files.filter((x) => x.id !== r.id); } catch (e) { toast('삭제 실패: ' + e.message); } }
+  FV.sel.clear(); drawFiles();
+}
+async function purgeOldTrash() {
+  const old = files.filter((f) => f.deleted_at && Date.now() - new Date(f.deleted_at) > TRASH_DAYS * 864e5);
+  if (!old.length) return;
+  await purgeFiles(old.map((f) => f.id), false); toast(`휴지통에서 ${TRASH_DAYS}일이 지난 파일 ${old.length}개를 완전히 삭제했어요`, 4000);
+}
+async function pickCategory(ids) {
+  const cats = [...new Set([...(S.cats || []), ...files.filter(alive).map((f) => f.category || '미분류')])];
+  const act = await sheet('카테고리 선택', [...cats.map((c) => ({ id: 'c:' + c, icon: '🏷️', label: c })), { id: 'new', icon: '＋', label: '새 카테고리 만들기' }]);
+  if (!act) return;
+  let cat = act.startsWith('c:') ? act.slice(2) : await askText({ title: '새 카테고리', label: '이름', placeholder: '예: 문법' });
+  if (!cat) return;
+  if (!(S.cats || []).includes(cat)) { S.cats = [...(S.cats || []), cat]; saveS(); }
+  for (const id of ids) { const r = files.find((x) => x.id === id); if (r) await update(r, { category: cat }, true); }
+  FV.sel.clear(); drawFiles(); toast(`'${cat}'로 바꿨어요`);
+}
+async function catDialog() {
+  const cats = [...new Set([...(S.cats || []), ...files.filter(alive).map((f) => f.category || '미분류')])].filter((c) => c !== '미분류');
+  const act = await sheet('카테고리 관리', [...cats.flatMap((c) => [{ id: 'r:' + c, icon: '✏️', label: `'${c}' 이름 바꾸기` }, { id: 'd:' + c, icon: '🗑', label: `'${c}' 삭제 (파일은 미분류로)`, danger: true }]), { id: 'add', icon: '＋', label: '새 카테고리 추가' }]);
+  if (!act) return;
+  if (act === 'add') { const v = await askText({ title: '새 카테고리', label: '이름' }); if (v && !(S.cats || []).includes(v)) { S.cats = [...(S.cats || []), v]; saveS(); drawFiles(); } return; }
+  const c = act.slice(2);
+  if (act[0] === 'r') {
+    const v = await askText({ title: '카테고리 이름 바꾸기', label: '이름', value: c }); if (!v || v === c) return;
+    for (const f of files.filter((f) => f.category === c)) await update(f, { category: v }, true);
+    S.cats = (S.cats || []).map((x) => (x === c ? v : x)); saveS(); if (filter.cat === c) filter.cat = v; drawFiles();
+  } else {
+    for (const f of files.filter((f) => f.category === c)) await update(f, { category: '미분류' }, true);
+    S.cats = (S.cats || []).filter((x) => x !== c); saveS(); if (filter.cat === c) filter.cat = '전체'; drawFiles();
+  }
+}
+async function fileMenu(row) {
+  const trash = !!row.deleted_at;
+  const items = trash
+    ? [{ id: 'restore', icon: '♻️', label: '복원' }, { id: 'purge', icon: '🗑', label: '완전히 삭제', danger: true }]
+    : [{ id: 'open', icon: '📂', label: '열기' }, { id: 'rename', icon: '✏️', label: '이름 바꾸기' }, { id: 'move', icon: '📦', label: '폴더로 이동' }, { id: 'copy', icon: '📄', label: '복사본 만들기' }, { id: 'cat', icon: '🏷️', label: '카테고리 바꾸기' }, { id: 'reclass', icon: '🤖', label: 'AI로 자동 분류' }, { id: 'trash', icon: '🗑', label: '휴지통으로 이동', danger: true }];
+  const act = await sheet(dispName(row), items);
+  const ids = idsFor(row.id);
+  if (act === 'open') location.hash = `#/f/${row.id}`;
+  if (act === 'rename') { const v = await askText({ title: '이름 바꾸기', label: '파일 이름', value: row.name, max: 80 }); if (v) update(row, { name: v }); }
+  if (act === 'move') { const to = await pickFolder({ title: '이동할 폴더', current: row.folder_id || null }); if (to !== undefined) await moveFilesTo(ids, to); }
+  if (act === 'copy') await copyFilesTo(ids, row.folder_id || null);
+  if (act === 'cat') await pickCategory(ids);
+  if (act === 'reclass') classify(row);
+  if (act === 'trash') await trashFiles(ids);
+  if (act === 'restore') await restoreFiles(ids);
+  if (act === 'purge') await purgeFiles(ids);
+}
+async function selAction(a) {
+  const ids = [...FV.sel];
+  if (a === 'clear') { FV.sel.clear(); FV.selecting = false; return drawFiles(); }
+  if (a === 'all') { $$('.tile.file').forEach((t) => FV.sel.add(t.dataset.id)); return updateSelUI(); }
+  if (a === 'move') { const to = await pickFolder({ title: `${ids.length}개를 이동할 폴더` }); if (to !== undefined) await moveFilesTo(ids, to); }
+  if (a === 'copy') { const to = await pickFolder({ title: `${ids.length}개를 복사할 폴더` }); if (to !== undefined) await copyFilesTo(ids, to); }
+  if (a === 'cat') await pickCategory(ids);
+  if (a === 'del') await trashFiles(ids);
+  if (a === 'restore') await restoreFiles(ids);
+  if (a === 'purge') await purgeFiles(ids);
+}
+
+// ── 클릭 ──
 view.addEventListener('click', async (e) => {
-  const chip = e.target.closest('.chip');
-  if (chip && $('#grid')) { filter.cat = chip.dataset.c; return drawFiles(); }
-  const card = e.target.closest('.file');
-  if (!card) return;
-  const row = files.find((f) => f.id === card.dataset.id);
-  const act = e.target.closest('[data-act]')?.dataset.act;
-  if (!act) return void (location.hash = `#/f/${row.id}`);
-  e.stopPropagation();
-  if (act === 'cat') {
-    const v = prompt('카테고리 이름', row.category || '');
-    if (v?.trim()) update(row, { category: v.trim() });
-  } else if (act === 'rename') {
-    const v = prompt('파일 이름', row.name);
-    if (v?.trim()) update(row, { name: v.trim() });
-  } else if (act === 'del') {
-    if (confirm(`'${row.name}'을(를) 삭제할까요? 필기도 함께 지워지고, 되돌릴 수 없어요.`)) {
-      try { await store.files.remove(row); files = files.filter((f) => f.id !== row.id); drawFiles(); } catch (er) { toast('삭제 실패: ' + er.message); }
-    }
-  } else if (act === 'reclass') classify(row, true);
+  if (!$('#grid') || Date.now() - DND.justDragged < 450) return;
+  const t = e.target;
+  const tab = t.closest('[data-tab]'); if (tab) { FV.tab = tab.dataset.tab; lsSet('sd-tab', FV.tab); FV.sel.clear(); return drawFiles(); }
+  const crumb = t.closest('.crumb'); if (crumb) { FV.folder = crumb.dataset.fid || null; FV.sel.clear(); return drawFiles(); }
+  const chip = t.closest('.chip[data-c]'); if (chip) { filter.cat = chip.dataset.c; return drawFiles(); }
+  if (t.closest('#addcat')) return catDialog();
+  const tbb = t.closest('[data-tb]');
+  if (tbb) { const ids = files.filter((f) => f.deleted_at).map((f) => f.id); return tbb.dataset.tb === 'empty' ? purgeFiles(ids) : restoreFiles(ids); }
+  const sb = t.closest('[data-sb]'); if (sb) return selAction(sb.dataset.sb);
+  const folder = t.closest('.tile.folder');
+  if (folder) { if (t.closest('[data-act=fmenu]')) return folderMenu(folder.dataset.fid); FV.folder = folder.dataset.fid; FV.sel.clear(); return drawFiles(); }
+  const card = t.closest('.tile.file'); if (!card) return;
+  const row = files.find((f) => f.id === card.dataset.id); if (!row) return;
+  if (t.closest('[data-act=menu]')) return fileMenu(row);
+  if (t.closest('.chk')) { const on = !FV.sel.has(row.id); on ? FV.sel.add(row.id) : FV.sel.delete(row.id); return updateSelUI(); }
+  if (FV.selecting || FV.sel.size) { FV.sel.has(row.id) ? FV.sel.delete(row.id) : FV.sel.add(row.id); return updateSelUI(); }
+  if (row.deleted_at) return fileMenu(row);
+  if (t.closest('[data-act=cat]')) return pickCategory([row.id]);
+  location.hash = `#/f/${row.id}`;
 });
 
-async function update(row, patch) {
-  try { const n = await store.files.update(row, patch); files = files.map((f) => (f.id === n.id ? n : f)); if ($('#grid')) drawFiles(); return n; } catch (e) { toast('저장 실패: ' + e.message); }
+// ── 드래그(마우스·터치 공통): 폴더로 이동 / 휴지통 / 1초 겹치면 폴더 만들기 ──
+const DND = { on: false, ids: [], kind: '', ghost: null, tile: null, timer: 0, hoverT: 0, ready: false, hit: null, key: '', sx: 0, sy: 0, touch: false, justDragged: 0 };
+function dndDown(e) {
+  if (!$('#grid') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const tile = e.target.closest('.tile'); if (!tile || tile.classList.contains('skel') || e.target.closest('.more,.chk')) return;
+  if (FV.tab === 'trash' && !tile.classList.contains('folder')) return;
+  DND.tile = tile; DND.sx = e.clientX; DND.sy = e.clientY; DND.touch = e.pointerType !== 'mouse';
+  clearTimeout(DND.timer);
+  if (DND.touch) DND.timer = setTimeout(() => dndStart(DND.sx, DND.sy), 380);
+}
+function dndMove(e) {
+  if (!DND.tile) return;
+  if (!DND.on) {
+    const d = Math.hypot(e.clientX - DND.sx, e.clientY - DND.sy);
+    if (DND.touch) { if (d > 12) { clearTimeout(DND.timer); DND.tile = null; } return; }
+    if (d > 6) dndStart(e.clientX, e.clientY);
+    return;
+  }
+  dndPos(e.clientX, e.clientY);
+}
+function dndStart(x, y) {
+  const t = DND.tile; if (!t || DND.on) return;
+  DND.on = true; DND.kind = t.classList.contains('folder') ? 'folder' : 'file';
+  const id = t.dataset.id || t.dataset.fid;
+  DND.ids = DND.kind === 'file' ? (FV.sel.has(id) ? [...FV.sel] : [id]) : [id];
+  const g = t.cloneNode(true); g.classList.add('ghost'); g.style.width = t.offsetWidth + 'px'; g.querySelectorAll('.more,.chk').forEach((n) => n.remove());
+  if (DND.ids.length > 1) g.insertAdjacentHTML('beforeend', `<span class="gcount">${DND.ids.length}</span>`);
+  document.body.append(g); DND.ghost = g;
+  const tz = document.createElement('div'); tz.className = 'trashzone'; tz.innerHTML = '<span>🗑</span><small>휴지통</small>'; document.body.append(tz);
+  document.body.classList.add('dragging'); t.classList.add('dragsrc'); navigator.vibrate?.(15);
+  dndPos(x, y);
+}
+function dndClear() { if (DND.hit?.el) DND.hit.el.classList.remove('drop-hover', 'merging', 'merge-ready'); $('.trashzone')?.classList.remove('hot'); $('[data-tab=trash]')?.classList.remove('drop-hover'); }
+function dndPos(x, y) {
+  const g = DND.ghost; if (!g) return;
+  g.style.transform = `translate(${x - g.offsetWidth / 2}px, ${y - 36}px) rotate(-3deg) scale(.95)`;
+  const el = document.elementFromPoint(x, y);
+  const tz = el?.closest('.trashzone'), tabT = el?.closest('[data-tab=trash]'), crumb = el?.closest('.crumb'), ft = el?.closest('.tile.folder'), fl = el?.closest('.tile.file');
+  let hit = null;
+  if (tz || tabT) hit = { type: 'trash', el: tabT || null };
+  else if (ft && !DND.ids.includes(ft.dataset.fid) && !(DND.kind === 'folder' && descOf(DND.ids[0]).has(ft.dataset.fid))) hit = { type: 'folder', id: ft.dataset.fid, el: ft };
+  else if (crumb && !(DND.kind === 'folder' && descOf(DND.ids[0]).has(crumb.dataset.fid || ''))) hit = { type: 'folder', id: crumb.dataset.fid || null, el: crumb };
+  else if (fl && DND.kind === 'file' && !DND.ids.includes(fl.dataset.id) && FV.tab !== 'trash') hit = { type: 'file', id: fl.dataset.id, el: fl };
+  const key = hit ? `${hit.type}:${hit.id || ''}` : '';
+  if (key === DND.key) return;
+  dndClear(); clearTimeout(DND.hoverT); DND.ready = false; DND.key = key; DND.hit = hit;
+  if (!hit) return;
+  if (hit.type === 'trash') { $('.trashzone')?.classList.add('hot'); hit.el?.classList.add('drop-hover'); }
+  else { hit.el.classList.add('drop-hover'); }
+  if (hit.type === 'file') { hit.el.classList.add('merging'); DND.hoverT = setTimeout(() => { DND.ready = true; hit.el.classList.add('merge-ready'); navigator.vibrate?.(25); }, 1000); }
+}
+async function dndEnd(cancel) {
+  clearTimeout(DND.timer); DND.tile = null;
+  if (!DND.on) return;
+  const { hit, ready, ids, kind } = DND;
+  clearTimeout(DND.hoverT); dndClear();
+  DND.ghost?.remove(); $('.trashzone')?.remove(); $('.dragsrc')?.classList.remove('dragsrc'); document.body.classList.remove('dragging');
+  Object.assign(DND, { on: false, ghost: null, hit: null, key: '', ready: false, justDragged: Date.now() });
+  if (cancel || !hit) return;
+  if (hit.type === 'trash') { kind === 'file' ? await trashFiles(ids) : toast('폴더는 ⋯ 메뉴에서 삭제할 수 있어요'); }
+  else if (hit.type === 'folder') { kind === 'file' ? await moveFilesTo(ids, hit.id) : await moveFolderTo(ids[0], hit.id); }
+  else if (hit.type === 'file') { ready ? await mergeToFolder(hit.id, ids) : toast('1초 동안 겹쳐 두면 폴더가 만들어져요'); }
+}
+
+async function newMemoDialog() {
+  const v = await askText({ title: '새 메모', label: '제목', placeholder: '예: 문법 정리', max: 60 }); if (!v) return;
+  try {
+    const nm = v.replace(/[\\/:*?"<>|]/g, '-') + '.md';
+    let row = await store.files.add(new File([`# ${v}\n\n`], nm, { type: 'text/markdown' }), FV.folder ? { folder_id: FV.folder } : {});
+    row = await store.files.update(row, { category: '메모', tags: ['메모'], summary: '직접 쓴 메모' });
+    files.unshift(row); FV.tab = 'memo'; lsSet('sd-tab', 'memo'); location.hash = `#/f/${row.id}`;
+  } catch (e) { toast('메모 만들기 실패: ' + e.message); }
+}
+
+async function update(row, patch, noDraw) {
+  try { const n = await store.files.update(row, patch); files = files.map((f) => (f.id === n.id ? n : f)); if (!noDraw && $('#grid')) drawFiles(); return n; } catch (e) { toast('저장 실패: ' + e.message); }
 }
 
 async function classify(row) {
@@ -364,8 +706,8 @@ async function handleFiles(list) {
     if (store.mode === 'cloud' && usedBytes() + f.size > QUOTA) { toast(`저장공간이 부족해요 (${mb(usedBytes())} / ${mb(QUOTA)}). 안 쓰는 파일을 삭제해 주세요.`, 5000); continue; }
     const t = toast(`⬆️ 업로드 중… ${f.name}`, 0);
     try {
-      const row = await store.files.add(f);
-      files.unshift(row); if ($('#grid')) drawFiles(); t.close();
+      const row = await store.files.add(f, FV.folder ? { folder_id: FV.folder } : {});
+      files.unshift(row); const tb = tabOf(row); if (tb !== FV.tab) { FV.tab = tb; lsSet('sd-tab', tb); } if ($('#grid')) drawFiles(); t.close();
       await classify(row);
     } catch (e) { t.close(); toast('업로드 실패: ' + e.message, 5000); }
   }
@@ -393,9 +735,9 @@ function noteDialog() {
     try {
       const blob = await makeNotePdf({ paper, pages: 1 });
       if (store.mode === 'cloud' && usedBytes() + blob.size > QUOTA) throw new Error('저장공간이 부족해요');
-      let row = await store.files.add(new File([blob], `${title}.pdf`, { type: 'application/pdf' }));
+      let row = await store.files.add(new File([blob], `${title}.pdf`, { type: 'application/pdf' }), FV.folder ? { folder_id: FV.folder } : {});
       row = await store.files.update(row, { category: '노트', tags: ['노트', PAPERS[paper]], summary: `직접 만든 ${PAPERS[paper]}` });
-      files.unshift(row); t.close();
+      files.unshift(row); FV.tab = 'note'; lsSet('sd-tab', 'note'); t.close();
       location.hash = `#/f/${row.id}`;
     } catch (er) { t.close(); toast('노트 만들기 실패: ' + er.message, 5000); }
   };
@@ -407,11 +749,13 @@ async function viewerView(id, page) {
   if (!files.length) try { files = await store.files.list(); } catch {}
   let row = files.find((f) => f.id === id);
   if (!row) { view.innerHTML = '<p class="pad muted">파일을 찾을 수 없어요. <a href="#/files">목록으로</a></p>'; return; }
+  if (row.deleted_at) { view.innerHTML = `<div class="empty"><div>🗑</div><h3>휴지통에 있는 파일이에요</h3><p class="muted">${TRASH_DAYS}일 안에는 복원할 수 있어요.</p><div class="row" style="justify-content:center"><button class="btn primary" id="rst">복원하기</button><a class="btn" href="#/files">목록으로</a></div></div>`; $('#rst').onclick = async () => { await restoreFiles([row.id]); location.hash = `#/f/${row.id}`; }; return; }
   view.innerHTML = '<div class="viewer"></div>';
   viewer = await mountViewer($('.viewer'), {
     store, row, page,
     onBack: () => (location.hash = '#/files'),
     onEvent: flag,
+    onLive: (pl) => store.live?.(pl),
     onCards: async (image) => {
       const t = toast('🃏 암기 카드를 만드는 중…', 0);
       try { const r = await ai('cards', { image }); t.close(); return r.cards || []; } catch (e) { t.close(); toast('카드 만들기 실패: ' + e.message, 5000); return []; }
@@ -759,7 +1103,7 @@ async function applyTemplate(t) {
     files = await store.files.list(); mistakes = await store.mistakes.list();
     const rows = [];
     for (const n of t.notes) {
-      let row = files.find((f) => f.name === n.name);
+      let row = files.find((f) => f.name === n.name && !f.deleted_at);
       if (!row) {
         let file;
         if (n.sample === 'toeic5') file = new File([await makeSamplePdf('TOEIC Part 5 Practice (original sample)', ['1. The manager asked all employees to ______ the report before Friday.', '   (A) submit   (B) submitting   (C) submission   (D) submitted', '', '2. The company will ______ a new energy-saving policy next month.', '   (A) implement   (B) appoint   (C) attend   (D) reserve', '', '3. Ms. Park was ______ for her outstanding contribution to the project.', '   (A) recognize   (B) recognized   (C) recognition   (D) recognizing', '', '4. Please keep your receipt ______ you need to return the item.', '   (A) in case   (B) because of   (C) as well as   (D) whereas', '', '5. The new software is ______ faster than the previous version.', '   (A) significant   (B) significantly   (C) signify   (D) significance', '', 'Answers: 1 A / 2 A / 3 B / 4 A / 5 B'])], n.name, { type: 'application/pdf' });

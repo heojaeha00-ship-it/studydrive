@@ -1,9 +1,9 @@
-import { $, $$, esc, toast, debounceKey, kind, ico } from './util.js';
+import { $, $$, esc, toast, kind, ico, uuid } from './util.js';
 import { openDoc, toJpegB64 } from './pdf.js';
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#111827', '#f59e0b'];
 
-export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAppend, onCards, onAddCard }) {
+export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAppend, onCards, onAddCard, onLive }) {
   const type = kind(row.name, row.mime);
   const isPaged = type === 'pdf' || type === 'image';
   root.innerHTML = `
@@ -41,14 +41,14 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   let tool = 'scroll', color = COLORS[0], zoom = 1, destroyed = false;
   const strokes = {}; // page -> [stroke]
   let drawingPage = 0;
-  const undo = [];
+  const undo = []; // 내가 그린 획 id
+  const liveS = new Map(); // 다른 기기에서 그리는 중인 획
   const objs = [];
   let io, current = 1, doc = null, img = null, blob = null;
 
   const flash = (t) => { if (savedEl) { savedEl.textContent = t; } };
-  const save = debounceKey(async (n) => {
-    try { await store.ann.save(row.id, n, strokes[n] || []); flash('저장됨 ✓'); } catch (e) { flash('저장 실패'); toast('필기 저장 실패: ' + e.message); }
-  }, 600);
+  const persistAdd = async (page, st) => { try { await store.ann.add(row.id, page, st); flash('저장됨 ✓'); } catch (e) { flash('저장 실패'); toast('필기 저장 실패: ' + e.message); } };
+  const persistDel = async (ids) => { try { await store.ann.remove(ids); flash('저장됨 ✓'); } catch { flash('저장 실패'); } };
 
   try { blob = await store.files.blob(row); } catch (e) { pagesEl.innerHTML = `<p class="muted pad">파일을 불러오지 못했어요: ${esc(e.message)}</p>`; return { destroy() {}, capture: async () => null, page: () => 1 }; }
 
@@ -56,14 +56,29 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   if (type === 'text') {
     const text = await blob.text();
     pagesEl.innerHTML = `<textarea class="texted" spellcheck="false">${esc(text)}</textarea>`;
-    root.addEventListener('click', async (e) => {
+    const ta = $('.texted', root), tg = document.createElement('div');
+    tg.className = 'rtag'; tg.hidden = true; root.append(tg);
+    let lastTyped = 0, sendT = 0, saveT = 0, tagT2 = 0, dirty = false;
+    const doSave = async () => { dirty = false; try { row = await store.files.replace(row, new Blob([ta.value], { type: row.mime || 'text/plain' })); flash('저장됨 ✓'); } catch { flash('저장 실패'); } };
+    ta.addEventListener('input', () => {
+      lastTyped = Date.now(); dirty = true; flash('저장 중…');
+      clearTimeout(sendT); sendT = setTimeout(() => onLive?.({ k: 't', fid: row.id, text: ta.value }), 120);
+      clearTimeout(saveT); saveT = setTimeout(doSave, 1000);
+    });
+    root.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a;
       if (a === 'back') onBack();
-      if (a === 'savetext') {
-        try { row = await store.files.replace(row, new Blob([$('.texted', root).value], { type: row.mime || 'text/plain' })); flash('저장됨 ✓'); } catch (er) { toast('저장 실패: ' + er.message); }
-      }
+      if (a === 'savetext') doSave();
     });
-    return { destroy() {}, capture: async () => null, page: () => 1 };
+    return {
+      live(p) {
+        if (p.k !== 't' || p.fid !== row.id || Date.now() - lastTyped < 1500) return;
+        const pos = ta.selectionStart; ta.value = p.text; ta.setSelectionRange(Math.min(pos, p.text.length), Math.min(pos, p.text.length));
+        tg.textContent = '✍️ 다른 기기에서 편집했어요'; tg.hidden = false; clearTimeout(tagT2); tagT2 = setTimeout(() => { tg.hidden = true; }, 2000);
+      },
+      remoteAdd() {}, remoteDel() {}, capture: async () => null, page: () => 1,
+      destroy() { clearTimeout(saveT); if (dirty) doSave(); },
+    };
   }
 
   // ── 지원하지 않는 형식 ──
@@ -169,17 +184,23 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     ctx.clearRect(0, 0, o.ov.width, o.ov.height);
     const w = o.rw || W(), d = dpr();
     for (const s of strokes[o.n] || []) drawStroke(ctx, s, w, d);
+    for (const l of liveS.values()) if (l.page === o.n) drawStroke(ctx, l.s, w, d);
     if (extra) drawStroke(ctx, extra, w, d);
   }
 
   function bindDraw(o) {
-    let cur = null, erasing = false, raf = 0;
+    let cur = null, erasing = false, raf = 0, lastSend = 0, sentN = 0;
     // y 좌표도 가로폭 기준으로 정규화 (페이지 폭이 바뀌어도 위치 유지)
     const pt = (e) => { const r = o.ov.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.width]; };
+    const sendLive = () => {
+      if (!cur || cur.p.length <= sentN) return;
+      onLive?.({ k: 's', fid: row.id, page: o.n, id: cur.id, t: cur.t, c: cur.c, w: cur.w, pts: cur.p.slice(sentN) });
+      sentN = cur.p.length;
+    };
     const erase = (p) => {
-      const before = (strokes[o.n] || []).length;
-      strokes[o.n] = (strokes[o.n] || []).filter((s) => !s.p.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 0.02));
-      if (strokes[o.n].length !== before) { redraw(o); save(o.n, o.n); flash('저장 중…'); }
+      const gone = [];
+      strokes[o.n] = (strokes[o.n] || []).filter((s) => { const hit = s.p.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 0.02); if (hit) gone.push(s.id); return !hit; });
+      if (gone.length) { redraw(o); flash('저장 중…'); persistDel(gone); }
     };
     o.ov.addEventListener('pointerdown', (e) => {
       if (tool === 'scroll') return;
@@ -187,24 +208,26 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       o.ov.setPointerCapture(e.pointerId);
       const p = pt(e); drawingPage = o.n;
       if (tool === 'eraser') { erasing = true; erase(p); return; }
-      cur = { t: tool === 'hl' ? 'hl' : 'pen', c: color, w: tool === 'hl' ? 0.022 : 0.0024, p: [p] };
-      redraw(o, cur);
+      cur = { id: uuid(), t: tool === 'hl' ? 'hl' : 'pen', c: color, w: tool === 'hl' ? 0.022 : 0.0024, p: [p] }; sentN = 0;
+      redraw(o, cur); sendLive();
     });
     o.ov.addEventListener('pointermove', (e) => {
       if (erasing) return erase(pt(e));
       if (!cur) return;
       for (const ev of e.getCoalescedEvents?.() ?? [e]) cur.p.push(pt(ev));
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (cur) redraw(o, cur); });
+      const now = performance.now(); if (now - lastSend > 55) { lastSend = now; sendLive(); }
     });
     const end = () => {
       erasing = false; drawingPage = 0;
       if (!cur) return;
-      (strokes[o.n] ||= []).push(cur);
-      undo.push(o.n);
-      cur = null;
+      sendLive();
+      const st = cur; cur = null;
+      (strokes[o.n] ||= []).push(st);
+      undo.push(st.id);
       redraw(o);
       flash('저장 중…');
-      save(o.n, o.n);
+      persistAdd(o.n, st);
       onEvent?.('draw');
     };
     o.ov.addEventListener('pointerup', end);
@@ -249,8 +272,8 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     if (a === 'zoomin') setZoom(zoom + 0.2);
     if (a === 'zoomout') setZoom(zoom - 0.2);
     if (a === 'undo') {
-      const n = undo.pop();
-      if (n && strokes[n]?.length) { strokes[n].pop(); redraw(objs[n - 1]); flash('저장 중…'); save(n, n); }
+      const id = undo.pop();
+      if (id) for (const k of Object.keys(strokes)) { const i = strokes[k].findIndex((x) => x.id === id); if (i >= 0) { strokes[k].splice(i, 1); redraw(objs[k - 1]); flash('저장 중…'); persistDel([id]); break; } }
     }
     if (a === 'ask') { const p = $('.askp', root); p.hidden = !p.hidden; root.classList.toggle('asking', !p.hidden); $('#askpg', root).textContent = `${current}쪽 기준`; if (!p.hidden) $('#askin', root).focus(); }
     if (a === 'cards') showCards();
@@ -272,14 +295,29 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   }
   const tag = document.createElement('div'); tag.className = 'rtag'; tag.hidden = true; root.append(tag);
   let tagT = 0;
-  function remote(fileId, page, st, device) {
-    if (fileId !== row.id || drawingPage === page) return;
-    strokes[page] = st || [];
+  function showTag(device) { tag.textContent = `✍️ ${device || '다른 기기'}에서 필기 중`; tag.hidden = false; clearTimeout(tagT); tagT = setTimeout(() => { tag.hidden = true; }, 2400); }
+  function remoteAdd(fid, page, st, device) {
+    if (fid !== row.id) return;
+    const arr = (strokes[page] ||= []);
+    liveS.delete(st.id);
+    if (arr.some((x) => x.id === st.id)) return; // 내가 그린 획의 되돌아온 알림
+    arr.push(st);
     const o = objs[page - 1]; if (!o) return;
-    redraw(o);
-    o.wrap.classList.remove('rflash'); void o.wrap.offsetWidth; o.wrap.classList.add('rflash');
-    tag.textContent = `✍️ ${device || '다른 기기'}에서 필기했어요`; tag.hidden = false; clearTimeout(tagT); tagT = setTimeout(() => { tag.hidden = true; }, 2400);
+    redraw(o); o.wrap.classList.remove('rflash'); void o.wrap.offsetWidth; o.wrap.classList.add('rflash');
+    showTag(device);
   }
+  function remoteDel(id) {
+    for (const k of Object.keys(strokes)) { const i = strokes[k].findIndex((x) => x.id === id); if (i >= 0) { strokes[k].splice(i, 1); const o = objs[k - 1]; if (o) redraw(o); return; } }
+  }
+  function live(p) {
+    if (p.fid !== row.id || p.k !== 's') return;
+    let l = liveS.get(p.id);
+    if (!l) { l = { page: p.page, s: { id: p.id, t: p.t, c: p.c, w: p.w, p: [] }, at: 0 }; liveS.set(p.id, l); }
+    l.s.p.push(...p.pts); l.at = Date.now();
+    const o = objs[p.page - 1]; if (o) redraw(o);
+    showTag(p.from ? '다른 기기' : '');
+  }
+  const liveGc = setInterval(() => { for (const [id, l] of liveS) if (Date.now() - l.at > 4000) { liveS.delete(id); const o = objs[l.page - 1]; if (o) redraw(o); } }, 2000);
   const hist = [];
   async function sendAsk(q) {
     q = (q || '').trim(); if (!q) return;
@@ -300,7 +338,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   $('.af', root)?.addEventListener('submit', (e) => { e.preventDefault(); const i = $('#askin', root); const v = i.value; i.value = ''; sendAsk(v); });
   const onVis = async () => {
     if (document.visibilityState !== 'visible' || destroyed) return;
-    try { const fresh = await store.ann.get(row.id); for (const k of Object.keys(fresh)) strokes[k] = fresh[k]; objs.forEach((o) => redraw(o)); } catch {}
+    try { const fresh = await store.ann.get(row.id); for (const k of Object.keys(strokes)) delete strokes[k]; Object.assign(strokes, fresh); objs.forEach((o) => redraw(o)); } catch {}
   };
   document.addEventListener('visibilitychange', onVis);
   const onResize = () => { layout(); objs.forEach((o) => { o.rw = 0; io.unobserve(o.wrap); io.observe(o.wrap); }); };
@@ -318,9 +356,9 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   });
 
   return {
-    remote,
+    remoteAdd, remoteDel, live,
     page: () => current,
     capture,
-    destroy() { destroyed = true; document.removeEventListener('visibilitychange', onVis); io?.disconnect(); window.removeEventListener('resize', onResize); objs.forEach((o) => o.task?.cancel()); doc?.destroy?.(); },
+    destroy() { destroyed = true; clearInterval(liveGc); document.removeEventListener('visibilitychange', onVis); io?.disconnect(); window.removeEventListener('resize', onResize); objs.forEach((o) => o.task?.cancel()); doc?.destroy?.(); },
   };
 }

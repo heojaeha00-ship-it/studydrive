@@ -4,10 +4,11 @@ import { uuid } from './util.js';
 let dbp;
 const db = () =>
   (dbp ||= new Promise((res, rej) => {
-    const r = indexedDB.open('studydrive', 1);
+    const r = indexedDB.open('studydrive', 3);
     r.onupgradeneeded = () => {
-      for (const s of ['files', 'blobs', 'mistakes']) r.result.createObjectStore(s, { keyPath: 'id' });
-      r.result.createObjectStore('ann', { keyPath: 'key' });
+      const d = r.result;
+      for (const s of ['files', 'blobs', 'mistakes', 'folders', 'strokes']) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('ann')) d.createObjectStore('ann', { keyPath: 'key' });
     };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -36,8 +37,8 @@ const RULES = [
 export function local() {
   const files = {
     list: async () => (await all('files')).sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    async add(file) {
-      const row = { id: uuid(), name: file.name, mime: file.type || '', size: file.size, category: '미분류', tags: [], summary: '', created_at: new Date().toISOString() };
+    async add(file, extra = {}) {
+      const row = { id: uuid(), name: file.name, mime: file.type || '', size: file.size, category: '미분류', tags: [], summary: '', folder_id: null, created_at: new Date().toISOString(), ...extra };
       await put('blobs', { id: row.id, blob: file });
       await put('files', row);
       return row;
@@ -46,18 +47,32 @@ export function local() {
     async remove(row) {
       await del('files', row.id);
       await del('blobs', row.id);
-      for (const a of await all('ann')) if (a.file_id === row.id) await del('ann', a.key);
+      for (const x of await all('strokes')) if (x.file_id === row.id) await del('strokes', x.id);
     },
     blob: async (row) => (await get('blobs', row.id)).blob,
+    async copy(row, extra = {}) {
+      const id = uuid(), blob = (await get('blobs', row.id)).blob;
+      const n = { ...row, id, created_at: new Date().toISOString(), ...extra };
+      await put('blobs', { id, blob }); await put('files', n);
+      for (const x of await all('strokes')) if (x.file_id === row.id) { const nid = uuid(); await put('strokes', { ...x, id: nid, file_id: id, data: { ...x.data, id: nid } }); }
+      return n;
+    },
     async replace(row, blob) { await put('blobs', { id: row.id, blob }); return files.update(row, { size: blob.size }); },
+  };
+  const folders = {
+    list: async () => (await all('folders')).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))),
+    async add(f) { const row = { id: uuid(), name: f.name, parent_id: f.parent_id || null, emoji: f.emoji || '📁', created_at: new Date().toISOString() }; await put('folders', row); return row; },
+    async update(id, patch) { const n = { ...(await get('folders', id)), ...patch }; await put('folders', n); return n; },
+    remove: (id) => del('folders', id),
   };
   const ann = {
     async get(fileId) {
       const out = {};
-      for (const a of await all('ann')) if (a.file_id === fileId) out[a.page] = a.strokes;
+      for (const r of (await all('strokes')).filter((x) => x.file_id === fileId).sort((a, b) => a.t - b.t)) (out[r.page] ||= []).push(r.data);
       return out;
     },
-    save: (fileId, page, strokes) => put('ann', { key: `${fileId}:${page}`, file_id: fileId, page, strokes }),
+    add: (fileId, page, st) => put('strokes', { id: st.id, file_id: fileId, page, data: st, t: Date.now() }),
+    async remove(ids) { for (const id of ids) await del('strokes', id); },
   };
   const mistakes = {
     list: async () => (await all('mistakes')).sort((a, b) => b.created_at.localeCompare(a.created_at)),
@@ -68,7 +83,8 @@ export function local() {
   return {
     mode: 'local',
     auth: { user: async () => ({ id: 'local', email: '이 기기 (로컬 모드)' }), signIn: async () => {}, signUp: async () => {}, signInAnon: async () => {}, upgrade: async () => {}, signOut: async () => {} },
-    files, ann, mistakes,
+    files, ann, mistakes, folders,
+    live() {},
     settings: {
       get: async () => { try { return JSON.parse(localStorage.getItem('sd-settings') || '{}'); } catch { return {}; } },
       set: async (v) => localStorage.setItem('sd-settings', JSON.stringify(v)),
