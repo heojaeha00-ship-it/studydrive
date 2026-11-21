@@ -44,6 +44,12 @@ async function route() {
   return filesView();
 }
 window.addEventListener('hashchange', route);
+// 다른 기기에서 바꾼 내용을 앱으로 돌아올 때 자동 반영 (목록·오답노트 화면만)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || $('#dlg')?.open) return;
+  const h = location.hash || '#/files';
+  if (h === '#/files' || h === '#/mistakes') route();
+});
 
 function renderNav(user, active) {
   const on = (k) => (active === k || (k === 'files' && active === 'f') ? 'on' : '');
