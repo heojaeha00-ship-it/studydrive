@@ -10,6 +10,7 @@ const cfg = window.SD_CONFIG || {};
 const store = cfg.url && cfg.key ? cloud(cfg) : local();
 const view = $('#view');
 const nav = $('#nav');
+const RESERVED = new Set(['노트', '예시', ...Object.values(PAPERS)]);
 const QUOTA = 100 * 1048576; // 사용자당 저장 한도
 const mb = (b) => (b / 1048576 < 10 ? (b / 1048576).toFixed(1) : Math.round(b / 1048576)) + 'MB';
 const usedBytes = () => files.reduce((a, f) => a + (f.size || 0), 0);
@@ -63,7 +64,12 @@ function renderNav(user, active) {
     <a href="#/review" class="${on('review')}"><i>🔁</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
     <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>📒</i><span>오답노트</span></a>
     <a href="#/explore" class="${on('explore')}"><i>🧭</i><span>둘러보기</span></a>
-    <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
+    <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' && !user.email ? '<button class="btn sm" id="upgrade">계정 만들기 (데이터 보존)</button>' : ''}${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
+  $('#upgrade')?.addEventListener('click', async () => {
+    const email = prompt('이메일'); if (!email) return;
+    const pw = prompt('비밀번호 (6자 이상)'); if (!pw) return;
+    try { await store.auth.upgrade(email, pw); toast('확인 메일을 보냈어요. 메일의 링크를 누르면 계정이 완성돼요.', 6000); } catch (e) { toast(e.message, 5000); }
+  });
   $('#logout')?.addEventListener('click', async () => { if (!user.email && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; await store.auth.signOut(); route.loaded = false; route(); });
   store.mistakes.list().then((m) => { mistakes = m; badge(); }).catch(() => {});
 }
@@ -92,7 +98,7 @@ function authView() {
   $('[data-m=up]', f).addEventListener('click', () => f.reportValidity() && go('up', f.email.value, f.pw.value));
   $('#demo')?.addEventListener('click', async () => {
     try { await store.auth.signInAnon(); route.loaded = false; route(); } // 방문자마다 개인 공간
-    catch { if (cfg.demoEmail) go('in', cfg.demoEmail, cfg.demoPassword); else toast('체험 시작에 실패했어요. 잠시 후 다시 시도해 주세요.'); }
+    catch { if (cfg.demoEmail) { toast('개인 체험 공간을 못 만들어 공용 데모 계정으로 들어가요 (다른 방문자와 데이터가 섞일 수 있어요)', 5000); go('in', cfg.demoEmail, cfg.demoPassword); } else toast('체험 시작에 실패했어요. 잠시 후 다시 시도해 주세요.'); }
   });
 }
 
@@ -195,7 +201,8 @@ async function classify(row) {
     else if (type === 'image') image = await pageImage(blob, 'image', 1, 900);
     const known = [...new Set([...(S.cats || []), ...files.map((f) => f.category)].filter((c) => c && c !== '미분류'))];
     const r = await ai('classify', { name: row.name, text, image, categories: known });
-    await update(row, { category: r.category || '미분류', tags: (r.tags || []).slice(0, 4), summary: r.summary || '' });
+    const keep = (row.tags || []).filter((x) => RESERVED.has(x));
+    await update(row, { category: r.category || '미분류', tags: [...keep, ...(r.tags || []).filter((x) => !RESERVED.has(x))].slice(0, 6), summary: r.summary || '' });
     t.close(); toast(`분류 완료: ${r.category}`);
   } catch (e) {
     t.close();
@@ -239,6 +246,7 @@ function noteDialog() {
     const t = toast('📝 노트를 만드는 중…', 0);
     try {
       const blob = await makeNotePdf({ paper, pages: 1 });
+      if (store.mode === 'cloud' && usedBytes() + blob.size > QUOTA) throw new Error('저장공간이 부족해요');
       let row = await store.files.add(new File([blob], `${title}.pdf`, { type: 'application/pdf' }));
       row = await store.files.update(row, { category: '노트', tags: ['노트', PAPERS[paper]], summary: `직접 만든 ${PAPERS[paper]}` });
       files.unshift(row); t.close();
@@ -310,9 +318,10 @@ async function explain(m, image) {
     const r = await ai('explain', { label: m.label, reason: m.reason, memo: m.memo, image });
     const n = await store.mistakes.update(m.id, { ai: r });
     mistakes = mistakes.map((x) => (x.id === n.id ? n : x));
+    const qk = queue.findIndex((x) => x.id === n.id); if (qk >= 0) queue[qk] = n;
     t.close(); toast('✅ AI 해설이 준비됐어요');
     if ($('#mlist')) drawMistakes();
-    if ($('#rv')) drawReview();
+    if ($('#rv')) { const keep = $('#recall')?.value; drawReview(); if (keep && $('#recall')) $('#recall').value = keep; }
   } catch (e) { t.close(); toast('AI 해설 실패: ' + e.message, 5000); }
 }
 
@@ -376,15 +385,28 @@ function drawReview() {
     <p class="muted center">얼마나 잘 기억났나요?</p>
     <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}"><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
   $('#mkai')?.addEventListener('click', () => explain(m));
-  $('#reveal')?.addEventListener('click', () => { $('#ans').hidden = false; $('#reveal').hidden = true; });
+  $('#reveal')?.addEventListener('click', async () => {
+    const recall = $('#recall')?.value.trim();
+    $('#ans').hidden = false; $('#reveal').hidden = true;
+    const expected = m.ai?.answer || m.memo;
+    if (!recall || !expected) return;
+    const fb = document.createElement('p'); fb.className = 'samplenote'; fb.textContent = '🤖 내 답을 채점하는 중…'; $('#ans').prepend(fb);
+    try {
+      const r = await ai('grade', { label: m.label, expected: String(expected).slice(0, 600), answer: recall.slice(0, 400) });
+      fb.textContent = `🤖 ${r.feedback || ''}`;
+      const btn = $(`[data-r=${r.suggest}]`); if (btn) { btn.classList.add('suggest'); $('small', btn).textContent += ' · 추천'; }
+    } catch { fb.remove(); }
+  });
   $$('[data-r]', rv).forEach((b) => b.addEventListener('click', () => rate(b.dataset.r)));
 }
+let rating = false;
 async function rate(r) {
-  const m = queue[qi]; if (!m) return;
+  const m = queue[qi]; if (!m || rating) return;
+  rating = true;
   const p = plan(m, r);
   const patch = p.graduated ? { graduated: true, stage: p.stage, last_result: r } : { stage: p.stage, next_review: p.next_review, last_result: r };
-  try { const n = await store.mistakes.update(m.id, patch); mistakes = mistakes.map((x) => (x.id === n.id ? n : x)); queue[qi] = n; } catch (e) { return toast('저장 실패: ' + e.message); }
-  done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); drawReview();
+  try { const n = await store.mistakes.update(m.id, patch); mistakes = mistakes.map((x) => (x.id === n.id ? n : x)); queue[qi] = n; } catch (e) { rating = false; return toast('저장 실패: ' + e.message); }
+  done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; drawReview();
 }
 addEventListener('keydown', (e) => {
   if (!$('#rv') || e.target.closest('input,textarea,select')) return;
@@ -447,6 +469,8 @@ async function quizView() {
     if (!qs.length) return void ($('#qz').innerHTML = `<div class="empty"><div>⚠️</div><p>${esc(e.message)}</p><a class="btn" href="#/mistakes">돌아가기</a></div>`);
     toast('AI 연결이 어려워 내 오답의 유사 문제로 퀴즈를 만들었어요', 4000);
   }
+  qs = qs.filter((q) => Array.isArray(q.choices) && q.choices.length >= 2).map((q) => ({ ...q, answer: (String(q.answer || '').toUpperCase().match(/[A-D]/) || [''])[0] })).filter((q) => q.answer);
+  if (!qs.length) return void ($('#qz').innerHTML = '<div class="empty"><div>⚠️</div><p>퀴즈를 만들지 못했어요. 잠시 후 다시 시도해 주세요.</p><a class="btn" href="#/mistakes">돌아가기</a></div>');
   let i = 0, score = 0;
   const draw = () => {
     const box = $('#qz'); if (!box) return;
@@ -476,9 +500,11 @@ function fallbackQuiz() {
 }
 async function registerQuizMiss(q) {
   try {
-    const label = '[퀴즈] ' + String(q.target || q.question).slice(0, 40);
+    const label = '[퀴즈] ' + String(q.question).replace(/\s+/g, ' ').slice(0, 40);
     if (mistakes.some((m) => m.label === label)) return;
-    const m = await store.mistakes.add({ file_id: null, file_name: 'AI 퀴즈', page: 1, label, reason: S.reasons[S.reasons.length - 1] || '기타', memo: String(q.question).slice(0, 200), stage: 0, next_review: today(S.intervals[0]), graduated: false, ai: { answer: `${q.answer}. ${q.explanation}` } });
+    const L = ['A', 'B', 'C', 'D'], right = q.choices[L.indexOf(q.answer)] || '';
+    const memo = `${q.question}\n${q.choices.map((c, k) => `${L[k]}. ${c}`).join('\n')}`.slice(0, 600);
+    const m = await store.mistakes.add({ file_id: null, file_name: 'AI 퀴즈', page: 1, label, reason: S.reasons[S.reasons.length - 1] || '기타', memo, stage: 0, next_review: today(S.intervals[0]), graduated: false, ai: { answer: `정답 ${q.answer}. ${right}`, reason: q.explanation, tip: q.target ? `겨냥한 약점: ${q.target}` : '' } });
     mistakes.unshift(m); badge(); toast('틀린 문제를 오답노트에 담았어요 📒');
   } catch {}
 }

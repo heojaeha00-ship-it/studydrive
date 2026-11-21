@@ -26,7 +26,7 @@ export function cloud(cfg) {
     },
     async blob(row) { return ok(await sb.storage.from('files').download(row.path)); },
     async replace(row, blob) {
-      ok(await sb.storage.from('files').upload(row.path, blob, { upsert: true, contentType: row.mime || 'text/plain' }));
+      ok(await sb.storage.from('files').upload(row.path, blob, { upsert: true, cacheControl: '0', contentType: row.mime || 'text/plain' }));
       return files.update(row, { size: blob.size });
     },
   };
@@ -59,6 +59,7 @@ export function cloud(cfg) {
         if (!d.session) throw new Error('가입 확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.');
       },
       async signInAnon() { ok(await sb.auth.signInAnonymously()); },
+      async upgrade(email, password) { ok(await sb.auth.updateUser({ email, password })); },
       signOut: () => sb.auth.signOut(),
     },
     files, ann, mistakes,

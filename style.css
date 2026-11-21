@@ -164,3 +164,10 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:var(--pri);box-sh
 @media (pointer:coarse){.lnk,.btn.sm,.chip{min-height:40px;padding-inline:12px}.tool{min-width:44px;height:44px}.dot{width:32px;height:32px}.rate kbd{display:none}}
 @media (min-width:861px){.viewer.asking .vscroll{margin-right:396px}}
 @media (max-width:860px){.vtitle{flex:1;max-width:none}.tools{margin-left:0;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.tools>*{flex:none}.saved{min-width:0}}
+
+.rate.suggest{box-shadow:0 0 0 2px var(--pri)}
+@media (max-width:860px){
+  .tools [data-a=mistake],.tools [data-a=ask]{position:fixed;bottom:18px;z-index:30;box-shadow:0 4px 14px rgba(0,0,0,.25);min-height:44px;padding-inline:16px}
+  .tools [data-a=mistake]{right:16px}.tools [data-a=ask]{right:128px}
+  .vscroll{padding-bottom:76px}
+}

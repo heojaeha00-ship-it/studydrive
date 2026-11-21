@@ -85,11 +85,13 @@ Deno.serve(async (req) => {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return json({ error: "로그인이 필요해요" }, 401);
 
-    const { data: allowed } = await sb.rpc("hit_ai_usage", { max_n: LIMIT });
-    if (allowed === false) return json({ error: `오늘 AI 사용 한도(${LIMIT}회)를 모두 썼어요. 내일 다시 이용해 주세요.` }, 429);
+    const limit = user.is_anonymous ? Math.min(LIMIT, 20) : LIMIT; // 게스트는 더 낮은 한도
+    const { data: allowed } = await sb.rpc("hit_ai_usage", { max_n: limit });
+    if (allowed === false) return json({ error: `오늘 AI 사용 한도(${limit}회)를 모두 썼어요. 내일 다시 이용해 주세요.` }, 429);
 
     const body = await req.json();
-    const img = typeof body.image === "string" && body.image.length < 2_500_000 ? body.image : null;
+    if (typeof body.image === "string" && body.image.length >= 2_500_000) return json({ error: "이미지가 너무 커요. 다른 쪽이나 더 작은 파일로 시도해 주세요." }, 413);
+    const img = typeof body.image === "string" ? body.image : null;
     const withImg = (text: string): Block[] => (img ? [{ image: img }, { text }] : [{ text }]);
 
     if (body.action === "classify") {
@@ -122,6 +124,13 @@ Deno.serve(async (req) => {
 choices에는 (A) 같은 기호를 붙이지 마세요. answer는 A~D 중 하나.`;
       const items = (Array.isArray(body.items) ? body.items : []).slice(0, 12);
       return json(await llm(true, sys, [{ text: JSON.stringify(items) }], 3000));
+    }
+
+    if (body.action === "grade") {
+      const sys = `당신은 학습 코치입니다. 학생이 복습하며 떠올려 적은 답을 저장된 정답과 비교해 채점하세요. 한국어로 한두 문장 피드백.
+반드시 JSON만 출력: {"feedback":"무엇이 맞고 무엇이 빠졌는지","suggest":"again|hard|good|easy 중 하나"}
+suggest 기준: again=핵심을 틀림/기억 못 함, hard=일부만 맞음, good=핵심이 맞음, easy=정확하고 완전함.`;
+      return json(await llm(false, sys, [{ text: `문제: ${String(body.label ?? "").slice(0, 100)}\n저장된 정답/해설: ${String(body.expected ?? "").slice(0, 600)}\n학생이 떠올린 답: ${String(body.answer ?? "").slice(0, 400)}` }], 600));
     }
 
     if (body.action === "weakness") {
