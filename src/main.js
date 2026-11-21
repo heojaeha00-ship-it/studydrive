@@ -45,8 +45,10 @@ const STEP_LABEL = ['파일 올리기', '필기해 보기', '오답 등록', '�
 const reasonsAll = () => [...new Set([...S.reasons, ...mistakes.map((m) => m.reason).filter(Boolean)])];
 
 // ───────── 라우터 ─────────
+let stop3d = null;
 async function route() {
   viewer?.destroy(); viewer = null;
+  if (stop3d) { stop3d(); stop3d = null; }
   document.body.classList.remove('viewer-mode');
   const user = await store.auth.user();
   document.body.classList.toggle('auth', !user);
@@ -93,18 +95,47 @@ function badge() { const b = $('#due-badge'); if (b) { const n = due().length; b
 // ───────── 로그인 ─────────
 function authView() {
   nav.innerHTML = '';
+  const FEATS = [
+    ['folder', '#38bdf8', 'AI 자료 관리', 'PDF를 올리면 AI가 카테고리·태그·요약을 붙여요. 스캔본은 첫 쪽 이미지를 읽어 정리해요.'],
+    ['repeat', '#34d399', '기기 간 동기화', 'PC·태블릿·폰 어디서든 같은 계정으로 이어서. 필기와 오답이 그대로 따라와요.'],
+    ['book', '#fbbf24', '간격 복습', '틀린 문제는 오답노트로, 1·3·7·14일 주기로 복습 일정을 잡아 줘요.'],
+    ['pen', '#c084fc', 'AI 해설·유사 문제', '문제 쪽 이미지를 AI가 읽고 해설, 틀린 이유, 유사 문제 2개를 만들어요.'],
+    ['mark', '#fb7185', '약점 진단·맞춤 퀴즈', '오답 통계로 약점을 진단하고, 내 오답을 겨냥한 퀴즈 5문제를 내 줘요.'],
+    ['compass', '#22d3ee', '원클릭 템플릿', '토익·수업·자격증 템플릿으로 폴더와 예시, 복습 일정을 3분 만에 시작해요.'],
+  ];
   view.innerHTML = `
-    <div class="auth-card">
-      <div class="logo">${logo(52)}</div>
-      <h1>스터디드라이브</h1>
-      <p class="muted">태블릿·폰·PC에서 이어서 공부하는<br>AI 학습 드라이브</p>
-      ${store.mode === 'cloud' ? '<button class="btn primary" id="demo">가입 없이 체험하기</button><div class="or">또는</div>' : ''}
-      <form id="af">
-        <label class="vh2" for="em">이메일</label><input id="em" type="email" name="email" placeholder="이메일" required autocomplete="email">
-        <label class="vh2" for="pw">비밀번호</label><input id="pw" type="password" name="pw" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password">
-        <div class="row"><button class="btn grow" data-m="in">로그인</button><button class="btn grow" type="button" data-m="up">회원가입</button></div>
-      </form>
+    <div class="landing">
+      <div id="bg3d" class="bg3d" aria-hidden="true"></div>
+      <header class="lp-head"><div class="brand">${logo(30)} <span>스터디드라이브</span></div>
+        <nav class="lp-nav"><a href="#lp-feats" data-scroll>기능</a><a href="#lp-edu" data-scroll>학습과학</a></nav></header>
+      <section class="lp-hero">
+        <div class="lp-copy">
+          <span class="lp-pill"><i></i>AI 학습 드라이브 · 개인 출품작</span>
+          <h1>문서를 올리면<br><em>내 오답이 내 복습표</em>가 됩니다</h1>
+          <p>태블릿에서 풀고, 폰으로 복습하고, PC로 정리하세요.<br>자료·필기·오답·복습이 하나로 이어지는 학습 드라이브예요.</p>
+          <div class="lp-cta">
+            ${store.mode === 'cloud' ? '<button class="btn primary lg" id="demo">가입 없이 체험하기 ✨</button>' : ''}
+            <a class="btn lg" href="#lp-feats" data-scroll>기능 살펴보기</a>
+          </div>
+          <div class="lp-stats"><span><b>3</b>기기 이어쓰기</span><span><b>7</b>AI 기능</span><span><b>4</b>단계 복습</span></div>
+        </div>
+        <form id="af" class="lp-card glass">
+          <h2>로그인</h2>
+          <label class="vh2" for="em">이메일</label><input id="em" type="email" name="email" placeholder="이메일" required autocomplete="email">
+          <label class="vh2" for="pw">비밀번호</label><input id="pw" type="password" name="pw" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password">
+          <div class="row"><button class="btn primary grow" data-m="in">로그인</button><button class="btn grow" type="button" data-m="up">회원가입</button></div>
+          <small>계정이 없어도 왼쪽 <b>가입 없이 체험하기</b>로 바로 써 볼 수 있어요.</small>
+        </form>
+      </section>
+      <section id="lp-feats" class="lp-feats">
+        ${FEATS.map(([i, c, t, d]) => `<article class="glass"><span class="fi" style="--c:${c}">${ico(i, 22)}</span><h3>${t}</h3><p>${d}</p></article>`).join('')}
+      </section>
+      <section id="lp-edu" class="lp-edu glass"><b>학습과학에 대응하는 기능</b>
+        <span>먼저 떠올려 적기(인출 연습)</span><span>1·3·7·14일 간격 복습</span><span>확신도 체크(메타인지)</span><span>시험 D-day·성장 기록</span></section>
+      <footer class="lp-foot">제출자 허재하 · 항해정보시스템학부 · 2024175 &nbsp;|&nbsp; 바이브코딩 경진대회 개인 출품작</footer>
     </div>`;
+  import('./intro3d.js').then((m) => { if ($('#bg3d')) stop3d = m.start($('#bg3d')); }).catch(() => {});
+  $$('[data-scroll]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); $(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' }); }));
   const go = async (m, email, pw) => {
     try { await (m === 'up' ? store.auth.signUp(email, pw) : store.auth.signIn(email, pw)); route.loaded = false; route(); } catch (e) { toast(e.message, 5000); }
   };

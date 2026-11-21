@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=esm --outfile=dist/app.js && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs dist/"
+    "build": "esbuild src/main.js --bundle --minify --format=esm --splitting --entry-names=app --outdir=dist && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs dist/"
   },
   "keywords": [],
   "author": "",
@@ -12,7 +12,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.119.2",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^4.10.38"
+    "pdfjs-dist": "^4.10.38",
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
