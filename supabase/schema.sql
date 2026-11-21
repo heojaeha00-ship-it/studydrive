@@ -127,3 +127,29 @@ alter table public.files add column if not exists device text;
 alter table public.mistakes add column if not exists device text;
 alter table public.annotations add column if not exists device text;
 alter publication supabase_realtime add table public.files, public.mistakes, public.annotations, public.folders;
+
+-- ===== 휴지통(7일) · 획 단위 공동 편집 · 아이디 가입 =====
+alter table public.files add column if not exists deleted_at timestamptz;
+
+create table if not exists public.strokes (
+  id uuid primary key,
+  file_id uuid not null references public.files(id) on delete cascade,
+  page int not null,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  data jsonb not null,
+  device text,
+  created_at timestamptz not null default now()
+);
+create index if not exists strokes_file_idx on public.strokes(file_id, page, created_at);
+alter table public.strokes enable row level security;
+drop policy if exists "strokes own" on public.strokes;
+create policy "strokes own" on public.strokes for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+alter table public.strokes replica identity full;
+do $$ begin
+  begin alter publication supabase_realtime add table public.strokes; exception when duplicate_object then null; end;
+end $$;
+
+-- 게스트(익명) 계정을 아이디 계정으로 승격할 때 edge function `account` 가 호출 (service role 전용)
+create or replace function public.finish_upgrade(uid uuid) returns void
+language sql security definer set search_path = public, auth as $$ update auth.users set is_anonymous = false where id = uid $$;
+revoke all on function public.finish_upgrade(uuid) from public, anon, authenticated;

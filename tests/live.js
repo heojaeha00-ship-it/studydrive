@@ -13,7 +13,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++
   await p.waitForSelector('#demo', { timeout: 20000 });
   ok(true, '로그인 화면 + 게스트 버튼');
   await p.click('#demo'); await p.waitForSelector('.hero', { timeout: 30000 });
-  ok(await p.locator('.who').innerText().then((t) => t.includes('게스트')), '가입 없이 게스트 로그인');
+  ok(await p.locator('#pfbtn').innerText().then((t) => t.includes('게스트')), '가입 없이 게스트 로그인');
 
   await p.click('[data-tpl=toeic]'); await p.waitForSelector('#rvstart', { timeout: 60000 }); await p.click('#rvstart'); await p.waitForSelector('#rv .big');
   ok(true, '템플릿 원클릭 → 서버에 파일·오답 생성 → 복습 카드');
@@ -26,8 +26,9 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++
   await p.click('[data-r=good]'); await p.waitForTimeout(800);
 
   // 새로고침해도 서버에서 데이터가 오는지(동기화)
-  await p.goto(BASE + '/#/files'); await p.reload({ waitUntil: 'networkidle' }); await p.waitForSelector('.file', { timeout: 30000 });
-  ok((await p.locator('.file').count()) >= 3, '새로고침 후에도 서버의 파일 목록 표시(' + (await p.locator('.file').count()) + '개)');
+  await p.goto(BASE + '/#/files'); await p.reload({ waitUntil: 'networkidle' }); await p.waitForSelector('.tile.file', { timeout: 30000 });
+  const nd = await p.locator('.tile.file').count(); await p.click('[data-tab=memo]'); await p.waitForTimeout(400);
+  ok(nd >= 1 && (await p.locator('.tile.file').count()) >= 2, `새로고침 후에도 서버의 자료 ${nd}개·메모 ${await p.locator('.tile.file').count()}개 표시`); await p.click('[data-tab=doc]');
 
   // PDF 열기 + AI 질문
   await p.click('.file:has-text("TOEIC") h3'); await p.waitForSelector('.vpage canvas.base', { timeout: 30000 }); await p.waitForTimeout(1200);

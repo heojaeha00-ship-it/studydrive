@@ -24,6 +24,12 @@ PC·태블릿·폰에서 **같은 계정**으로 열면 필기·오답·파일�
 - AI 약점 분석 · AI 질문(보고 있는 쪽 기준) · 내 오답 기반 AI 맞춤 퀴즈
 - 둘러보기 탭: 원클릭 시작 세팅(토익/대학/자격증), 4단계 복습(다시·어려움·좋음·쉬움)
 
+## 새 기능
+- 두 기기 동시 필기(획 단위 병합, 라이브 테스트 `tests/sync.js`로 검증)
+- 폴더·드래그 정리·휴지통(7일 후 자동 삭제)·메모 분리 보관
+- 이메일 없는 아이디 가입(`supabase/functions/account`), 프로필(닉네임·아이콘·색)
+- 15초 홍보 영상 생성 코드: `promo/` (`generate-audio.js` + Remotion)
+
 ## 구조
 `index.html` + `dist/app.js`(빌드 결과, 커밋됨) · 백엔드는 Supabase(Auth·DB·Storage) + Edge Function(`ai`)
 

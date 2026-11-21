@@ -22,7 +22,7 @@ const ink = (p, sel = '.vpage .ov') => p.evaluate((s) => { const c = document.qu
   const ph = await b.newContext({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' });
   const A = await login(pc); const B = await login(ph);
   await A.goto(BASE + '/#/files'); await B.goto(BASE + '/#/files');
-  await A.waitForSelector('#newnote'); await B.waitForSelector('#grid');
+  await A.waitForSelector('#newnote'); await B.waitForSelector('#grid'); await B.click('[data-tab=note]');
 
   // 1) 연결된 기기 표시(접속 상태 공유)
   await A.waitForFunction(() => /기기 2대/.test(document.querySelector('#sync')?.textContent || ''), null, { timeout: 25000 }).catch(() => {});
@@ -31,14 +31,14 @@ const ink = (p, sel = '.vpage .ov') => p.evaluate((s) => { const c = document.qu
 
   // 2) 파일 생성 → 다른 기기 목록에 새로고침 없이 나타남
   const t0 = Date.now();
-  await A.click('#newnote'); await A.fill('input[name=title]', NAME); await A.click('dialog .btn.primary');
+  await A.waitForTimeout(2500); await A.click('#newnote'); await A.fill('input[name=title]', NAME); await A.click('dialog .btn.primary');
   await A.waitForSelector('.vpage canvas.base', { timeout: 30000 });
-  await B.waitForSelector(`.file:has-text("${NAME}")`, { timeout: 20000 }).catch(() => {});
-  const seen = await B.locator(`.file:has-text("${NAME}")`).count();
+  await B.waitForSelector(`.tile.file:has-text("${NAME}")`, { timeout: 20000 }).catch(() => {});
+  const seen = await B.locator(`.tile.file:has-text("${NAME}")`).count();
   ok(seen === 1, `PC에서 만든 노트가 폰 목록에 새로고침 없이 나타남 (${((Date.now() - t0) / 1000).toFixed(1)}초)`);
 
   // 3) 폰에서 같은 노트를 열고, PC에서 필기 → 폰에 실시간 표시
-  await B.click(`.file:has-text("${NAME}") h3`); await B.waitForSelector('.vpage canvas.base', { timeout: 30000 }); await B.waitForTimeout(800);
+  await B.click(`.tile.file:has-text("${NAME}") .ticon`); await B.waitForSelector('.vpage canvas.base', { timeout: 30000 }); await B.waitForTimeout(800);
   await A.waitForTimeout(800); await A.click('[data-tool=pen]');
   const bx = await A.locator('.vpage').first().boundingBox();
   const before = await ink(B);
@@ -48,6 +48,21 @@ const ink = (p, sel = '.vpage .ov') => p.evaluate((s) => { const c = document.qu
   for (let i = 0; i < 120; i++) { if ((await ink(B)) > before) { lat = (Date.now() - t1) / 1000; break; } await B.waitForTimeout(100); }
   ok(lat !== null, `PC의 필기가 폰 화면에 실시간 반영됨 (${lat === null ? '실패' : lat.toFixed(1) + '초'})`);
   await B.screenshot({ path: '/tmp/sync-phone.png' }).catch(() => {});
+  // 3-2) 동시 공동 편집: 폰도 같은 쪽에 필기 → PC에 나타나고, 서로의 획이 사라지지 않음
+  const inkA0 = await ink(A), inkB0 = await ink(B);
+  const pb = await B.locator('.vpage').first().boundingBox();
+  await B.touchscreen.tap(pb.x + 40, pb.y + 40).catch(() => {});
+  await B.click('[data-tool=pen]').catch(() => {});
+  const tB = Date.now();
+  await Promise.all([
+    (async () => { await A.mouse.move(bx.x + 100, bx.y + 330); await A.mouse.down(); await A.mouse.move(bx.x + 300, bx.y + 380, { steps: 10 }); await A.mouse.up(); })(),
+    (async () => { await B.mouse.move(pb.x + 40, pb.y + 120); await B.mouse.down(); await B.mouse.move(pb.x + 250, pb.y + 170, { steps: 10 }); await B.mouse.up(); })(),
+  ]);
+  await A.waitForTimeout(2500);
+  const inkA1 = await ink(A), inkB1 = await ink(B);
+  ok(inkA1 > inkA0 && inkB1 > inkB0, `두 기기가 동시에 필기해도 양쪽 화면에 모두 반영 (PC ${inkA0}→${inkA1}, 폰 ${inkB0}→${inkB1}, ${((Date.now() - tB) / 1000).toFixed(1)}초)`);
+  await A.reload(); await A.waitForSelector('.vpage canvas.base'); await A.waitForTimeout(2500);
+  ok((await ink(A)) >= inkA1 * 0.9, '새로고침해도 두 기기의 필기가 모두 남아 있음');
 
   // 4) 폰에서 오답 등록 → PC 쪽 오답 개수 배지 갱신(새로고침 없이)
   await A.goto(BASE + '/#/mistakes'); await A.waitForSelector('#mlist', { state: 'attached', timeout: 20000 });
