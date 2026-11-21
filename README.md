@@ -5,7 +5,8 @@
 - 파일 업로드 → AI 자동 분류(카테고리·태그·요약), 어느 기기에서든 다운로드 없이 열람
 - PDF·이미지 위에 펜/형광펜 필기, 자동 저장 · 기기 간 동기화
 - 틀린 문제 등록 → AI 해설·유사 문제 → 1·3·7·14일 간격 복습 스케줄
-- AI 약점 분석
+- AI 약점 분석 · AI 질문(보고 있는 쪽 기준) · 내 오답 기반 AI 맞춤 퀴즈
+- 둘러보기 탭: 원클릭 시작 세팅(토익/대학/자격증), 4단계 복습(다시·어려움·좋음·쉬움)
 
 ## 구조
 `index.html` + `dist/app.js`(빌드 결과, 커밋됨) · 백엔드는 Supabase(Auth·DB·Storage) + Edge Function(`ai`)
@@ -14,7 +15,10 @@
 1. Supabase 프로젝트 생성 → SQL Editor에 `supabase/schema.sql` 전체 실행
 2. Authentication → Providers → Email → **Confirm email 끄기** (심사위원 가입이 쉬워짐)
 3. Edge Functions → Deploy a new function → 이름 `ai` → `supabase/functions/ai/index.ts` 붙여넣기 → Deploy
-4. Edge Functions → Secrets → `ANTHROPIC_API_KEY` 추가 (선택: `AI_DAILY_LIMIT`, 기본 사용자당 하루 60회)
+4. Edge Functions → Secrets → AI 키 추가 (둘 중 하나)
+   - **무료**: `GEMINI_API_KEY` — https://aistudio.google.com/apikey 에서 발급 (카드 불필요)
+   - 유료: `ANTHROPIC_API_KEY`
+   - 선택: `AI_DAILY_LIMIT` (기본 사용자당 하루 60회)
 5. `config.js`에 Project URL / anon key (+ 데모 계정) 입력
 6. GitHub Pages 켜기 (Settings → Pages → main / root)
 
