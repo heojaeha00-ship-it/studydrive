@@ -1,4 +1,4 @@
-import { $, $$, esc, toast, debounceKey, kind } from './util.js';
+import { $, $$, esc, toast, debounceKey, kind, ico } from './util.js';
 import { openDoc, toJpegB64 } from './pdf.js';
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#111827', '#f59e0b'];
@@ -12,17 +12,17 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       <div class="vtitle" title="${esc(row.name)}">${esc(row.name)}</div>
       ${isPaged ? `
       <div class="tools">
-        <button class="tool on" data-tool="scroll" title="스크롤" aria-label="스크롤">✋</button>
-        <button class="tool" data-tool="pen" title="펜" aria-label="펜">✏️</button>
-        <button class="tool" data-tool="hl" title="형광펜" aria-label="형광펜">🖍️</button>
-        <button class="tool" data-tool="eraser" title="지우개" aria-label="지우개">🧽</button>
+        <button class="tool on" data-tool="scroll" title="스크롤" aria-label="스크롤">${ico('pointer', 18)}</button>
+        <button class="tool" data-tool="pen" title="펜" aria-label="펜">${ico('pen', 18)}</button>
+        <button class="tool" data-tool="hl" title="형광펜" aria-label="형광펜">${ico('mark', 18)}</button>
+        <button class="tool" data-tool="eraser" title="지우개" aria-label="지우개">${ico('eraser', 18)}</button>
         <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}" aria-label="색 ${i + 1}"></button>`).join('')}</span>
-        <button class="tool" data-a="undo" title="되돌리기">↩️</button>
-        <button class="tool" data-a="zoomout" title="축소">－</button>
-        <button class="tool" data-a="zoomin" title="확대">＋</button>
+        <button class="tool" data-a="undo" title="되돌리기" aria-label="되돌리기">${ico('undo', 18)}</button>
+        <button class="tool" data-a="zoomout" title="축소" aria-label="축소">${ico('minus', 18)}</button>
+        <button class="tool" data-a="zoomin" title="확대" aria-label="확대">${ico('plus', 18)}</button>
         <span class="pg" id="pg">1 / 1</span>
-        <button class="btn sm" data-a="cards" title="이 쪽으로 암기 카드 만들기">🃏 카드</button>
-        <button class="btn sm" data-a="ask">💬 AI 질문</button>
+        <button class="btn sm" data-a="cards" title="이 쪽으로 암기 카드 만들기">${ico('cards', 16)} 카드</button>
+        <button class="btn sm" data-a="ask">${ico('chat', 16)} AI 질문</button>
         <button class="btn primary sm" data-a="mistake">오답 등록</button>
         <span class="saved" id="saved"></span>
       </div>` : type === 'text' ? `<div class="tools"><button class="btn primary sm" data-a="savetext">저장</button><span class="saved" id="saved"></span></div>` : ''}

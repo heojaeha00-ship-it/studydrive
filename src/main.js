@@ -1,4 +1,4 @@
-import { $, $$, esc, toast, today, fmtDate, kind, REASONS, INTERVALS, guessCategory } from './util.js';
+import { $, $$, esc, toast, today, fmtDate, kind, REASONS, INTERVALS, guessCategory, ico, logo } from './util.js';
 import { local } from './store-local.js';
 import { cloud } from './store-cloud.js';
 import { openDoc, pageText, pageImage } from './pdf.js';
@@ -74,11 +74,11 @@ document.addEventListener('visibilitychange', () => {
 function renderNav(user, active) {
   const on = (k) => (active === k || (k === 'files' && active === 'f') ? 'on' : '');
   nav.innerHTML = `
-    <div class="brand">📚 <span>스터디드라이브</span></div>
-    <a href="#/files" class="${on('files')}"><i>🗂️</i><span>내 파일</span></a>
-    <a href="#/review" class="${on('review')}"><i>🔁</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
-    <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>📒</i><span>오답노트</span></a>
-    <a href="#/explore" class="${on('explore')}"><i>🧭</i><span>둘러보기</span></a>
+    <div class="brand">${logo(26)} <span>스터디드라이브</span></div>
+    <a href="#/files" class="${on('files')}"><i>${ico('folder')}</i><span>내 파일</span></a>
+    <a href="#/review" class="${on('review')}"><i>${ico('repeat')}</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
+    <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>${ico('book')}</i><span>오답노트</span></a>
+    <a href="#/explore" class="${on('explore')}"><i>${ico('compass')}</i><span>둘러보기</span></a>
     <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' && !user.email ? '<button class="btn sm" id="upgrade">계정 만들기 (데이터 보존)</button>' : ''}${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
   $('#upgrade')?.addEventListener('click', async () => {
     const email = prompt('이메일'); if (!email) return;
@@ -95,7 +95,7 @@ function authView() {
   nav.innerHTML = '';
   view.innerHTML = `
     <div class="auth-card">
-      <div class="logo">📚</div>
+      <div class="logo">${logo(52)}</div>
       <h1>스터디드라이브</h1>
       <p class="muted">태블릿·폰·PC에서 이어서 공부하는<br>AI 학습 드라이브</p>
       ${store.mode === 'cloud' ? '<button class="btn primary" id="demo">가입 없이 체험하기</button><div class="or">또는</div>' : ''}
