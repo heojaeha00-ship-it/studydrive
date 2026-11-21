@@ -15,7 +15,7 @@ const QUOTA = 100 * 1048576; // 사용자당 저장 한도
 const mb = (b) => (b / 1048576 < 10 ? (b / 1048576).toFixed(1) : Math.round(b / 1048576)) + 'MB';
 const usedBytes = () => files.reduce((a, f) => a + (f.size || 0), 0);
 const ICON = { pdf: '📕', image: '🖼️', text: '📝', other: '📄' };
-let files = [], mistakes = [], viewer = null;
+let files = [], folders = [], mistakes = [], viewer = null;
 const classifying = new Set();
 const filter = { cat: '전체', q: '' };
 let S = { intervals: INTERVALS, reasons: REASONS, cats: [], activity: {}, flags: {}, tpl: null, seen: false };
@@ -290,7 +290,7 @@ function authView() {
 }
 
 // ───────── 내 파일 (홈 화면처럼 정리: 폴더·드래그·휴지통) ─────────
-let folders = [];
+
 const lsGet = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const FV = { tab: lsGet('sd-tab', 'doc'), folder: null, sort: lsGet('sd-sort', 'new'), layout: lsGet('sd-layout', 'icons'), sel: new Set(), selecting: false };
