@@ -40,6 +40,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   const savedEl = $('#saved', root);
   let tool = 'scroll', color = COLORS[0], zoom = 1, destroyed = false;
   const strokes = {}; // page -> [stroke]
+  let drawingPage = 0;
   const undo = [];
   const objs = [];
   let io, current = 1, doc = null, img = null, blob = null;
@@ -184,7 +185,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       if (tool === 'scroll') return;
       e.preventDefault();
       o.ov.setPointerCapture(e.pointerId);
-      const p = pt(e);
+      const p = pt(e); drawingPage = o.n;
       if (tool === 'eraser') { erasing = true; erase(p); return; }
       cur = { t: tool === 'hl' ? 'hl' : 'pen', c: color, w: tool === 'hl' ? 0.022 : 0.0024, p: [p] };
       redraw(o, cur);
@@ -196,7 +197,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (cur) redraw(o, cur); });
     });
     const end = () => {
-      erasing = false;
+      erasing = false; drawingPage = 0;
       if (!cur) return;
       (strokes[o.n] ||= []).push(cur);
       undo.push(o.n);
@@ -269,6 +270,16 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     box.innerHTML = cards.length ? cards.map((c, i) => `<div class="msg a cardmsg"><b>${esc(c.front)}</b><br>${esc(c.back)}<br><button class="lnk" data-card="${i}">복습에 추가</button></div>`).join('') : '<p class="muted">카드를 만들지 못했어요.</p>';
     $$('[data-card]', box).forEach((b) => (b.onclick = async () => { b.disabled = true; try { await onAddCard?.(cards[b.dataset.card], pg); b.textContent = '추가됨 ✓'; } catch { b.disabled = false; toast('카드 추가 실패'); } }));
   }
+  const tag = document.createElement('div'); tag.className = 'rtag'; tag.hidden = true; root.append(tag);
+  let tagT = 0;
+  function remote(fileId, page, st, device) {
+    if (fileId !== row.id || drawingPage === page) return;
+    strokes[page] = st || [];
+    const o = objs[page - 1]; if (!o) return;
+    redraw(o);
+    o.wrap.classList.remove('rflash'); void o.wrap.offsetWidth; o.wrap.classList.add('rflash');
+    tag.textContent = `✍️ ${device || '다른 기기'}에서 필기했어요`; tag.hidden = false; clearTimeout(tagT); tagT = setTimeout(() => { tag.hidden = true; }, 2400);
+  }
   const hist = [];
   async function sendAsk(q) {
     q = (q || '').trim(); if (!q) return;
@@ -307,6 +318,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   });
 
   return {
+    remote,
     page: () => current,
     capture,
     destroy() { destroyed = true; document.removeEventListener('visibilitychange', onVis); io?.disconnect(); window.removeEventListener('resize', onResize); objs.forEach((o) => o.task?.cancel()); doc?.destroy?.(); },

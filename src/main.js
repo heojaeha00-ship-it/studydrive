@@ -1,4 +1,4 @@
-import { $, $$, esc, toast, today, fmtDate, kind, REASONS, INTERVALS, guessCategory, ico, logo } from './util.js';
+import { $, $$, esc, toast, today, fmtDate, kind, REASONS, INTERVALS, guessCategory, ico, logo, deviceInfo, confetti, countUp } from './util.js';
 import { local } from './store-local.js';
 import { cloud } from './store-cloud.js';
 import { openDoc, pageText, pageImage } from './pdf.js';
@@ -45,6 +45,83 @@ const steps = () => [files.length > 0, !!S.flags.draw, mistakes.length > 0, mist
 const STEP_LABEL = ['파일 올리기', '필기해 보기', '오답 등록', '복습 1회'];
 const reasonsAll = () => [...new Set([...S.reasons, ...mistakes.map((m) => m.reason).filter(Boolean)])];
 
+// ───────── 실시간 동기화 ─────────
+let lastLocal = 0, stopRealtime = null, syncState = { status: 'idle', devices: [] }, lastAnnToast = 0, qrTimer = 0;
+for (const grp of [store.files, store.mistakes, store.ann]) for (const k of Object.keys(grp)) if (/^(add|update|remove|replace|save)$/.test(k) && typeof grp[k] === 'function') { const f = grp[k]; grp[k] = (...a) => { lastLocal = Date.now(); return f.apply(grp, a); }; }
+
+function devIcons() {
+  const seen = new Map(); syncState.devices.forEach((d) => seen.set(d.id, d));
+  return [...seen.values()].map((d) => `<span title="${esc(d.label)}">${esc(d.icon)}</span>`).join('');
+}
+function renderSync(flash) {
+  const el = $('#sync'); if (!el) return;
+  if (store.mode !== 'cloud' || document.body.classList.contains('auth')) { el.hidden = true; return; }
+  el.hidden = false;
+  const on = syncState.status === 'online', n = new Set(syncState.devices.map((d) => d.id)).size;
+  el.className = `sync ${on ? 'on' : 'off'}${flash ? ' flash' : ''}`;
+  el.innerHTML = `<i class="dot"></i><span>${flash ? esc(flash) : on ? `동기화 켜짐${n > 1 ? ` · 기기 ${n}대` : ''}` : syncState.status === 'idle' ? '연결 중…' : '오프라인'}</span><b>${devIcons()}</b>`;
+  const dl = $('#devlist'); if (dl) dl.innerHTML = devList();
+}
+function devList() {
+  const seen = new Map(); syncState.devices.forEach((d) => seen.set(d.id, d));
+  const me = deviceInfo().id;
+  return seen.size ? [...seen.values()].map((d) => `<span class="devchip ${d.id === me ? 'me' : ''}">${esc(d.icon)} ${esc(d.label)}${d.id === me ? ' (이 기기)' : ''}</span>`).join('') : '<span class="muted">연결 중…</span>';
+}
+function startSync() {
+  if (store.mode !== 'cloud' || stopRealtime) return;
+  stopRealtime = () => {};
+  store.realtime({
+    status: (st) => { syncState.status = st; renderSync(); },
+    presence: (list) => { const had = new Set(syncState.devices.map((d) => d.id)); syncState.devices = list; renderSync();
+      list.filter((d) => !had.has(d.id) && d.id !== deviceInfo().id && had.size).forEach((d) => toast(`${d.icon} ${d.label}이(가) 연결됐어요`, 3000)); },
+    change: onRemote,
+  }).then((stop) => { stopRealtime = stop; });
+}
+function onRemote(table, p) {
+  const ev = p.eventType, rec = p.new && p.new.id !== undefined || p.new?.file_id ? p.new : null, old = p.old || {};
+  const mine = Date.now() - lastLocal < 2500;
+  const dev = rec?.device;
+  if (table === 'annotations') {
+    if (!rec || mine) return;
+    viewer?.remote?.(rec.file_id, rec.page, rec.strokes, dev);
+    if (Date.now() - lastAnnToast > 8000) { lastAnnToast = Date.now(); renderSync(`${dev || '다른 기기'}에서 필기 중`); setTimeout(() => renderSync(), 2200); }
+    return;
+  }
+  const arr = table === 'files' ? files : mistakes;
+  if (ev === 'DELETE') { const i = arr.findIndex((x) => x.id === old.id); if (i >= 0) arr.splice(i, 1); }
+  else if (rec) { const i = arr.findIndex((x) => x.id === rec.id); if (i >= 0) arr[i] = { ...arr[i], ...rec }; else arr.unshift(rec); }
+  if (table === 'files' && $('#grid')) { drawFiles(); rec && $(`.file[data-id="${rec.id}"]`)?.classList.add('flash'); }
+  if (table === 'mistakes') { badge(); if ($('#mlist')) drawMistakes(); if ($('#grid')) drawFiles(); }
+  if (!mine && ev === 'INSERT' && rec) {
+    const label = dev || '다른 기기';
+    toast(table === 'files' ? `${label}에서 파일을 올렸어요: ${rec.name}` : `${label}에서 오답을 등록했어요`, 3200);
+    renderSync(`${label}에서 변경됨`); setTimeout(() => renderSync(), 2200);
+  }
+}
+async function openLinkDialog() {
+  const d = $('#dlg');
+  d.innerHTML = `<div class="dlg-body linkdlg"><h3>📲 다른 기기에서 이어서 열기</h3>
+    <p class="muted">폰이나 태블릿 카메라로 QR을 찍으면 <b>같은 계정</b>으로 열려요. 한쪽에서 필기·오답을 바꾸면 다른 쪽에 <b>바로</b> 나타나요.</p>
+    <div class="qrbox"><canvas id="qr" width="260" height="260"></canvas><div id="qrnote" class="muted"></div></div>
+    <div class="muted" style="font-size:12px">지금 연결된 내 기기</div><div id="devlist" class="devs">${devList()}</div>
+    <p class="muted" style="font-size:12px;margin-top:6px">※ 이 QR에는 로그인 정보가 들어 있어요. 시연용이며 약 1시간 동안 안정적으로 유지돼요. 다른 사람에게 보여 주지 마세요.</p>
+    <div class="row end"><button class="btn" data-x>닫기</button></div></div>`;
+  d.showModal(); $('[data-x]', d).onclick = () => d.close(); d.onclose = () => clearInterval(qrTimer);
+  const draw = async () => {
+    const url = await store.auth.linkUrl(); if (!url) return;
+    const QR = (await import('qrcode')).default;
+    await QR.toCanvas($('#qr'), url, { width: 260, margin: 1, errorCorrectionLevel: 'L', color: { dark: '#1b2140', light: '#ffffff' } });
+    let left = 120; $('#qrnote').textContent = `QR은 ${left}초 뒤 사라져요`;
+    clearInterval(qrTimer);
+    qrTimer = setInterval(() => {
+      left--; const n = $('#qrnote'); if (!n) return clearInterval(qrTimer);
+      if (left > 0) n.textContent = `QR은 ${left}초 뒤 사라져요`;
+      else { clearInterval(qrTimer); $('#qr').getContext('2d').clearRect(0, 0, 260, 260); n.innerHTML = '<button class="btn sm" id="qrre">QR 다시 만들기</button>'; $('#qrre').onclick = draw; }
+    }, 1000);
+  };
+  draw();
+}
+
 // ───────── 라우터 ─────────
 let stop3d = null;
 async function route() {
@@ -53,11 +130,12 @@ async function route() {
   document.body.classList.remove('viewer-mode');
   const user = await store.auth.user();
   document.body.classList.toggle('auth', !user);
-  if (!user) return authView();
+  if (!user) { if (stopRealtime) { stopRealtime(); stopRealtime = null; } renderSync(); return authView(); }
   if (!route.loaded) { S = { ...S, ...(await store.settings.get().catch(() => ({}))) }; route.loaded = true; }
   const [path, qs] = location.hash.replace(/^#\/?/, '').split('?');
   const [a, b] = path.split('/');
   renderNav(user, a || 'files');
+  startSync(); renderSync();
   view.classList.remove('fade'); void view.offsetWidth; view.classList.add('fade');
   if (a === 'f' && b) return viewerView(b, Number(new URLSearchParams(qs).get('p')) || 1);
   if (a === 'review') return reviewView();
@@ -71,7 +149,7 @@ window.addEventListener('hashchange', route);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || $('#dlg')?.open) return;
   const h = location.hash || '#/files';
-  if (h === '#/files' || h === '#/mistakes') route();
+  if (h === '#/files' || h === '#/mistakes') (async () => { try { await store.auth.consumeLink?.(); } catch {} route(); })();
 });
 
 function renderNav(user, active) {
@@ -82,6 +160,7 @@ function renderNav(user, active) {
     <a href="#/review" class="${on('review')}"><i>${ico('repeat')}</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
     <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>${ico('book')}</i><span>오답노트</span></a>
     <a href="#/explore" class="${on('explore')}"><i>${ico('compass')}</i><span>둘러보기</span></a>
+    ${store.mode === 'cloud' ? `<button class="btn sm navsync" id="syncbtn">${ico('link', 16)} 다른 기기로 열기</button>` : ''}
     <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' && !user.email ? '<button class="btn sm" id="upgrade">계정 만들기 (데이터 보존)</button>' : ''}${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
   $('#upgrade')?.addEventListener('click', () => {
     const d = $('#dlg');
@@ -97,6 +176,7 @@ function renderNav(user, active) {
       try { await store.auth.upgrade(f.email.value.trim(), f.pw.value); d.close(); toast('확인 메일을 보냈어요. 메일의 링크를 누르면 계정이 완성돼요.', 6000); } catch (er) { toast(er.message, 5000); }
     };
   });
+  $('#syncbtn')?.addEventListener('click', openLinkDialog);
   $('#logout')?.addEventListener('click', async () => { if (!user.email && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; await store.auth.signOut(); route.loaded = false; route(); });
   store.mistakes.list().then((m) => { mistakes = m; badge(); }).catch(() => {});
 }
@@ -137,6 +217,12 @@ function authView() {
           <small>계정이 없어도 왼쪽 <b>가입 없이 체험하기</b>로 바로 써 볼 수 있어요.</small>
         </form>
       </section>
+      <section class="lp-sync glass">
+        <div class="lp-sync-copy"><span class="lp-pill"><i></i>이 앱의 핵심</span><h2>한 기기에서 쓰면,<br><em>다른 기기에 바로</em> 나타나요</h2>
+          <p>PC에서 PDF에 필기하면 폰·태블릿 화면에 새로고침 없이 그려집니다. 오답 등록, 파일 업로드도 마찬가지예요. 지금 연결된 기기는 화면 위에 실시간으로 표시돼요.</p>
+          <ul><li>실시간 반영 — 필기·오답·파일</li><li>연결된 기기 표시 — 💻 PC · 📟 태블릿 · 📱 폰</li><li>QR 한 번으로 다른 기기 연결</li></ul></div>
+        <svg class="lp-sync-art" viewBox="0 0 420 240" role="img" aria-label="PC, 태블릿, 폰이 클라우드를 통해 실시간으로 연결되는 그림"><use href="#syncart-big"/></svg>
+      </section>
       <section id="lp-feats" class="lp-feats">
         ${FEATS.map(([i, c, t, d]) => `<article class="glass"><span class="fi" style="--c:${c}">${ico(i, 22)}</span><h3>${t}</h3><p>${d}</p></article>`).join('')}
       </section>
@@ -170,7 +256,7 @@ async function filesView() {
     </header>
     <div id="stats"></div><div id="banner"></div><div id="chips" class="chips"></div><div id="grid" class="grid"></div>
     <div id="drop" class="drop">여기에 놓아서 업로드</div>`;
-  $('#grid').innerHTML = '<p class="muted">불러오는 중…</p>';
+  $('#grid').innerHTML = Array.from({ length: 6 }, () => '<div class="card skel"><i></i><i></i><i></i></div>').join('');
   try { [files, mistakes] = await Promise.all([store.files.list(), store.mistakes.list()]); } catch (e) { return void ($('#grid').innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`); }
   if (!S.seen) { S.seen = true; saveS(); if (!files.length) { location.hash = '#/explore'; return; } }
   badge();
@@ -190,9 +276,9 @@ function statsHtml() {
   const n = due().length, grad = mistakes.filter((m) => m.graduated).length;
   const wk = [6, 5, 4, 3, 2, 1, 0].map((i) => S.activity[today(-i)] || 0), mx = Math.max(1, ...wk);
   return `<section class="stats">
-    <a class="stat hot" href="#/review"><b>${n}</b><span>오늘 복습</span></a>
-    <div class="stat"><b>🔥 ${streak()}</b><span>연속 학습일</span></div>
-    <div class="stat"><b>🎓 ${grad}</b><span>마스터한 오답</span></div>
+    <a class="stat hot" href="#/review"><b data-count="${n}">0</b><span>오늘 복습</span></a>
+    <div class="stat"><b>🔥 <span data-count="${streak()}">0</span></b><span>연속 학습일</span></div>
+    <div class="stat"><b>🎓 <span data-count="${grad}">0</span></b><span>마스터한 오답</span></div>
     <div class="stat week" title="최근 7일 학습량">${wk.map((v) => `<i style="height:${6 + (v / mx) * 30}px" class="${v ? 'on' : ''}"></i>`).join('')}<span>7일</span></div>
   </section>${store.mode === 'cloud' ? `<div class="quota" title="사용자당 저장 한도"><div><i style="width:${Math.min(100, (usedBytes() / QUOTA) * 100)}%"></i></div><small>저장공간 ${mb(usedBytes())} / ${mb(QUOTA)}</small></div>` : ''}`;
 }
@@ -201,6 +287,7 @@ function drawFiles() {
   const cats = [...new Set([...(S.cats || []), ...files.map((f) => f.category || '미분류')])];
   if (filter.cat !== '전체' && !cats.includes(filter.cat)) filter.cat = '전체';
   $('#stats').innerHTML = statsHtml() + growthHtml();
+  $$('#stats [data-count]').forEach((el) => countUp(el, +el.dataset.count));
   const st = steps(), dn = st.filter(Boolean).length;
   $('#banner').innerHTML = dn < 4 ? `<a class="banner" href="#/explore">🚀 시작 가이드 ${dn}/4 · 다음: <b>${STEP_LABEL[st.indexOf(false)]}</b> (둘러보기에서 시작)</a>` : '';
   $('#chips').innerHTML = ['전체', ...cats].map((c) => `<button class="chip${filter.cat === c ? ' on' : ''}" data-c="${esc(c)}">${esc(c)} <small>${c === '전체' ? files.length : files.filter((f) => (f.category || '미분류') === c).length}</small></button>`).join('');
@@ -436,6 +523,7 @@ function drawReview() {
   if (!queue.length || qi >= queue.length) {
     const nxt = mistakes.filter((m) => !m.graduated).map((m) => m.next_review).sort()[0];
     const tot = Object.values(done).reduce((a, b) => a + b, 0);
+    if (queue.length) setTimeout(() => confetti(), 120);
     rv.innerHTML = `<div class="empty"><div>${queue.length ? '🎉' : '✅'}</div><h2>${queue.length ? '오늘 복습 끝!' : '오늘 복습할 오답이 없어요'}</h2>
       ${queue.length ? `<p>${tot}개 완료 · 🔥 연속 ${streak()}일</p>${insightHtml()}` : ''}<p class="muted">${nxt ? `다음 복습: ${nxt}` : '파일을 풀다가 틀린 문제를 오답 등록해 보세요.'}</p>
       <div class="row" style="justify-content:center"><a class="btn" href="#/quiz">🎯 AI 맞춤 퀴즈</a><a class="btn primary" href="#/files">내 파일로</a></div></div>`;
@@ -490,6 +578,8 @@ async function rate(r) {
   const m = queue[qi]; if (!m || rating) return;
   if (!revealed) return toast('먼저 [정답 확인]을 눌러 주세요');
   rating = true;
+  $('.card.big')?.classList.add('leave');
+  await new Promise((res) => setTimeout(res, 170));
   const p = plan(m, r);
   const entry = { d: today(), r, s: m.stage || 0, c: conf || null };
   const hh = [...(m.hist || []), entry].slice(-30);
@@ -565,7 +655,7 @@ async function quizView() {
   let i = 0, score = 0;
   const draw = () => {
     const box = $('#qz'); if (!box) return;
-    if (i >= qs.length) { bump(); flag('quiz'); (S.quizLog ||= []).push({ d: today(), score, n: qs.length }); S.quizLog = S.quizLog.slice(-20); saveS(); box.innerHTML = `<div class="empty"><div>${score >= qs.length * 0.8 ? '🏆' : '💪'}</div><h2>${score} / ${qs.length} 정답</h2><p class="muted">틀린 문제는 자동으로 오답노트에 담겼어요. 복습 일정에 들어가요.</p><div class="row" style="justify-content:center"><button class="btn" id="again">새 문제로 다시</button><a class="btn primary" href="#/mistakes">오답노트로</a></div></div>`; $('#again').onclick = quizView; return; }
+    if (i >= qs.length) { if (score >= qs.length * 0.8) setTimeout(() => confetti(), 120); bump(); flag('quiz'); (S.quizLog ||= []).push({ d: today(), score, n: qs.length }); S.quizLog = S.quizLog.slice(-20); saveS(); box.innerHTML = `<div class="empty"><div>${score >= qs.length * 0.8 ? '🏆' : '💪'}</div><h2>${score} / ${qs.length} 정답</h2><p class="muted">틀린 문제는 자동으로 오답노트에 담겼어요. 복습 일정에 들어가요.</p><div class="row" style="justify-content:center"><button class="btn" id="again">새 문제로 다시</button><a class="btn primary" href="#/mistakes">오답노트로</a></div></div>`; $('#again').onclick = quizView; return; }
     const q = qs[i], L = ['A', 'B', 'C', 'D'];
     box.innerHTML = `<div class="prog"><div style="width:${(i / qs.length) * 100}%"></div></div><p class="muted">${i + 1} / ${qs.length}${q.target ? ` · 겨냥: ${esc(q.target)}` : ''}</p>
       <article class="card big"><h3 class="pre">${esc(q.question)}</h3><div class="choices">${(q.choices || []).map((c, k) => `<button class="choice" data-k="${L[k]}">${L[k]}. ${esc(c)}</button>`).join('')}</div><div id="fb"></div></article>`;
@@ -623,6 +713,17 @@ async function exploreView() {
       <div class="steps">${STEP_LABEL.map((l, i) => `<div class="step ${st[i] ? 'ok' : ''}"><i>${st[i] ? '✓' : i + 1}</i><span>${l}</span></div>`).join('')}</div>
     </section>
 
+    ${store.mode === 'cloud' ? `
+    <section class="card syncdemo">
+      <div class="sd-copy">
+        <h3>${ico('link', 20)} 기기 간 동기화 — 직접 확인해 보세요</h3>
+        <p>한쪽에서 필기하거나 오답을 등록하면 <b>다른 기기에 새로고침 없이 바로</b> 나타나요.</p>
+        <ol><li>아래 버튼으로 QR을 띄우고, 폰·태블릿 카메라로 찍어요.</li><li>PC에서 PDF를 열고, 폰에서도 같은 파일을 열어요.</li><li>한쪽에서 필기해 보세요. 다른 쪽에 바로 나타나요.</li></ol>
+        <div class="row"><button class="btn primary" id="linkbtn">📲 QR로 다른 기기 연결하기</button><span class="devs" id="devlist">${devList()}</span></div>
+      </div>
+      <svg class="sd-art" viewBox="0 0 300 150" aria-hidden="true"><use href="#syncart"/></svg>
+    </section>` : `<section class="card syncdemo"><div class="sd-copy"><h3>${ico('link', 20)} 기기 간 동기화</h3><p>로그인(또는 가입 없이 체험)하면 PC·태블릿·폰이 같은 계정으로 실시간 동기화돼요.</p></div></section>`}
+
     <h3 class="sec">한 번에 시작하기</h3>
     <div class="tpls">${TEMPLATES.map((t) => `
       <article class="card tpl ${S.tpl === t.id ? 'active' : ''}">
@@ -644,6 +745,7 @@ async function exploreView() {
     <div class="chips" id="presets">${Object.entries(PRESETS).map(([k, p]) => `<button class="chip ${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? 'on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>`;
   $$('[data-tpl]').forEach((b) => (b.onclick = () => applyTemplate(TEMPLATES.find((t) => t.id === b.dataset.tpl))));
   $('#rmsample')?.addEventListener('click', removeSamples);
+  $('#linkbtn')?.addEventListener('click', openLinkDialog);
   const setGoal = () => { S.goal = { date: $('#goaldate').value, target: $('#goaltarget').value }; saveS(); };
   $('#goaldate')?.addEventListener('change', setGoal); $('#goaltarget')?.addEventListener('change', setGoal);
   $$('#presets .chip').forEach((c) => (c.onclick = () => { S.intervals = PRESETS[c.dataset.p].intervals; saveS(); toast('복습 주기를 바꿨어요'); exploreView(); }));
@@ -690,5 +792,6 @@ async function removeSamples() {
   } catch (e) { toast('삭제 실패: ' + e.message); }
 }
 
+$('#sync')?.addEventListener('click', openLinkDialog);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 route();

@@ -72,7 +72,40 @@ const IC = {
   minus: '<path d="M5 12h14"/>',
   cards: '<rect x="4" y="8" width="13" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.5A8 8 0 1 1 21 12z"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.1 0l2.8-2.8a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0L4.1 13.8a5 5 0 0 0 7.1 7.1l1.1-1.1"/>',
   flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
 };
 export const ico = (n, sz = 20) => `<svg class="ico" width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
 export const logo = (sz = 28) => `<svg class="logo-mark" width="${sz}" height="${sz}" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3451c7"/><stop offset="1" stop-color="#7c4dff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><rect x="8" y="8" width="16" height="16" rx="3" fill="#fff"/><path d="M11 13h10M11 17h7" stroke="#3451c7" stroke-width="1.8" stroke-linecap="round"/><path d="M16 22l2 2 4-5" fill="none" stroke="#12b886" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+let _dev;
+export function deviceInfo() {
+  if (_dev) return _dev;
+  const ua = navigator.userAgent || '';
+  const touch = navigator.maxTouchPoints > 1;
+  const tablet = /iPad|Tablet/i.test(ua) || (/Macintosh/.test(ua) && touch) || (/Android/i.test(ua) && !/Mobile/i.test(ua));
+  const phone = !tablet && /Mobi|iPhone|Android/i.test(ua);
+  const kind = tablet ? 'tablet' : phone ? 'phone' : 'pc';
+  let id; try { id = localStorage.getItem('sd-device') || (() => { const v = uuid(); localStorage.setItem('sd-device', v); return v; })(); } catch { id = uuid(); }
+  _dev = { id, kind, label: { tablet: '태블릿', phone: '폰', pc: 'PC' }[kind], icon: { tablet: '📟', phone: '📱', pc: '💻' }[kind] };
+  return _dev;
+}
+
+export function confetti(n = 90) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const cv = document.createElement('canvas'); cv.className = 'confetti';
+  cv.width = innerWidth; cv.height = innerHeight; document.body.append(cv);
+  const g = cv.getContext('2d'), cols = ['#3451c7', '#7c4dff', '#12b886', '#ffd43b', '#ff6b6b', '#22d3ee'];
+  const ps = Array.from({ length: n }, () => ({ x: innerWidth / 2 + (Math.random() - 0.5) * 160, y: innerHeight * 0.55, vx: (Math.random() - 0.5) * 11, vy: -Math.random() * 13 - 4, s: Math.random() * 6 + 4, c: cols[(Math.random() * cols.length) | 0], r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4 }));
+  const t0 = performance.now();
+  (function f(t) {
+    const k = t - t0; g.clearRect(0, 0, cv.width, cv.height);
+    ps.forEach((p) => { p.vy += 0.38; p.x += p.vx; p.y += p.vy; p.r += p.vr; g.save(); g.translate(p.x, p.y); g.rotate(p.r); g.globalAlpha = Math.max(0, 1 - k / 1900); g.fillStyle = p.c; g.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * 0.6); g.restore(); });
+    if (k < 1900) requestAnimationFrame(f); else cv.remove();
+  })(t0);
+}
+export function countUp(el, to, ms = 650) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || to === 0) return (el.textContent = el.dataset.fmt ? el.dataset.fmt.replace('#', to) : to);
+  const t0 = performance.now(), fmt = el.dataset.fmt || '#';
+  (function f(t) { const p = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - p, 3); el.textContent = fmt.replace('#', Math.round(to * e)); if (p < 1) requestAnimationFrame(f); })(t0);
+}
