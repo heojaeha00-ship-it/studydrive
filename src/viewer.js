@@ -3,7 +3,7 @@ import { openDoc, toJpegB64 } from './pdf.js';
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#111827', '#f59e0b'];
 
-export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent }) {
+export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAddPage }) {
   const type = kind(row.name, row.mime);
   const isPaged = type === 'pdf' || type === 'image';
   root.innerHTML = `
@@ -18,6 +18,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
         <button class="tool" data-tool="eraser" title="지우개">🧽</button>
         <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}</span>
         <button class="tool" data-a="undo" title="되돌리기">↩️</button>
+        ${row.tags?.includes('노트') ? '<button class="tool" data-a="addpage" title="쪽 추가">＋쪽</button>' : ''}
         <button class="tool" data-a="zoomout" title="축소">－</button>
         <button class="tool" data-a="zoomin" title="확대">＋</button>
         <span class="pg" id="pg">1 / 1</span>
@@ -224,6 +225,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     if (c) { color = c.dataset.color; $$('.dot', root).forEach((d) => d.classList.toggle('on', d === c)); if (tool === 'scroll' || tool === 'eraser') setTool('pen'); return; }
     const a = e.target.closest('[data-a]')?.dataset.a;
     if (a === 'back') onBack();
+    if (a === 'addpage') onAddPage?.();
     if (a === 'zoomin') setZoom(zoom + 0.2);
     if (a === 'zoomout') setZoom(zoom - 0.2);
     if (a === 'undo') {

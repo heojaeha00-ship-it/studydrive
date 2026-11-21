@@ -4,6 +4,7 @@ import { cloud } from './store-cloud.js';
 import { openDoc, pageText, pageImage } from './pdf.js';
 import { mountViewer } from './viewer.js';
 import { TEMPLATES, PRESETS, SCENARIOS } from './templates.js';
+import { PAPERS, paperKey, makeNotePdf, addPages } from './blank.js';
 
 const cfg = window.SD_CONFIG || {};
 const store = cfg.url && cfg.key ? cloud(cfg) : local();
@@ -95,6 +96,7 @@ async function filesView() {
     <header class="vh"><h2>내 파일</h2>
       <div class="row">
         <input id="q" type="search" placeholder="🔍 검색" value="${esc(filter.q)}">
+        <button class="btn" id="newnote">📝 새 노트</button>
         <label class="btn primary">＋ 업로드<input id="up" type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md"></label>
       </div>
     </header>
@@ -106,6 +108,7 @@ async function filesView() {
   badge();
   drawFiles();
   $('#q').addEventListener('input', (e) => { filter.q = e.target.value; drawFiles(); });
+  $('#newnote').addEventListener('click', noteDialog);
   $('#up').addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });
   const drop = $('#drop');
   addEventListener('dragover', (e) => { if ($('#grid')) { e.preventDefault(); drop.classList.add('on'); } });
@@ -204,6 +207,36 @@ async function handleFiles(list) {
   }
 }
 
+// ───────── 새 노트 (빈 PDF) ─────────
+function noteDialog() {
+  const d = $('#dlg'), d0 = today();
+  d.innerHTML = `
+    <form class="dlg-body">
+      <h3>📝 새 노트 만들기</h3>
+      <p class="muted">빈 PDF 노트를 만들어 바로 필기할 수 있어요. 어느 기기에서든 이어서 써요.</p>
+      <label>제목<input name="title" value="새 노트 ${d0}" required></label>
+      <label>종이<select name="paper">${Object.entries(PAPERS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+      <label>쪽수<input name="pages" type="number" min="1" max="50" value="10"></label>
+      <div class="row end"><button type="button" class="btn ghost" data-x>취소</button><button class="btn primary">만들기</button></div>
+    </form>`;
+  d.showModal();
+  const f = $('form', d);
+  $('[data-x]', d).onclick = () => d.close();
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const title = f.title.value.trim().replace(/[\\/:*?"<>|]/g, '-') || '새 노트', paper = f.paper.value, pages = Math.max(1, Math.min(50, Number(f.pages.value) || 10));
+    d.close();
+    const t = toast('📝 노트를 만드는 중…', 0);
+    try {
+      const blob = await makeNotePdf({ paper, pages });
+      let row = await store.files.add(new File([blob], `${title}.pdf`, { type: 'application/pdf' }));
+      row = await store.files.update(row, { category: '노트', tags: ['노트', PAPERS[paper]], summary: `직접 만든 ${PAPERS[paper]} ${pages}쪽` });
+      files.unshift(row); t.close();
+      location.hash = `#/f/${row.id}`;
+    } catch (er) { t.close(); toast('노트 만들기 실패: ' + er.message, 5000); }
+  };
+}
+
 // ───────── 뷰어 ─────────
 async function viewerView(id, page) {
   document.body.classList.add('viewer-mode');
@@ -215,6 +248,14 @@ async function viewerView(id, page) {
     store, row, page,
     onBack: () => (location.hash = '#/files'),
     onEvent: flag,
+    onAddPage: async () => {
+      try {
+        const { blob, count } = await addPages(await store.files.blob(row), paperKey(row.tags), 1);
+        const n = await store.files.replace(row, blob);
+        files = files.map((f) => (f.id === n.id ? n : f));
+        location.hash = `#/f/${row.id}?p=${count}`; route();
+      } catch (e) { toast('쪽 추가 실패: ' + e.message); }
+    },
     onMistake: (ctx) => mistakeDialog({ file: row, ...ctx }),
   });
 }
