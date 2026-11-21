@@ -15,7 +15,7 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++
   await p.click('#demo'); await p.waitForSelector('.hero', { timeout: 30000 });
   ok(await p.locator('.who').innerText().then((t) => t.includes('게스트')), '가입 없이 게스트 로그인');
 
-  await p.click('[data-tpl=toeic]'); await p.waitForSelector('#rv .big', { timeout: 60000 });
+  await p.click('[data-tpl=toeic]'); await p.waitForSelector('#rvstart', { timeout: 60000 }); await p.click('#rvstart'); await p.waitForSelector('#rv .big');
   ok(true, '템플릿 원클릭 → 서버에 파일·오답 생성 → 복습 카드');
 
   // 정답 확인 → AI 채점

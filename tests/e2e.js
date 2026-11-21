@@ -12,7 +12,7 @@ const ok = (c, msg) => { console.log((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fai
   await p.goto(BASE + '/'); await p.waitForSelector('.hero');
   ok(p.url().endsWith('#/explore'), '첫 방문은 둘러보기로 이동');
 
-  await p.click('[data-tpl=toeic]'); await p.waitForSelector('#rv .big');
+  await p.click('[data-tpl=toeic]'); await p.waitForSelector('#rvstart'); await p.click('#rvstart'); await p.waitForSelector('#rv .big');
   ok((await p.locator('.rate').count()) === 4, '복습 카드에 4단계 평가 버튼');
   await p.click('.conf .chip >> nth=0'); await p.click('#reveal');
   ok(await p.locator('#ans').isVisible(), '정답 확인 시 해설 표시');

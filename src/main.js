@@ -154,33 +154,76 @@ document.addEventListener('visibilitychange', () => {
   if (h === '#/files' || h === '#/mistakes') (async () => { try { await store.auth.consumeLink?.(); } catch {} route(); })();
 });
 
+const AVATARS = ['🙂', '😎', '🧑‍🎓', '👩‍💻', '🧑‍💻', '🦊', '🐱', '🐶', '🦉', '🐼', '🐧', '🦁', '🚢', '⚓', '📚', '✏️', '🔥', '⭐', '🌈', '🍀', '🎯', '🚀', '🌙', '☕'];
+const PCOLORS = ['#3451c7', '#7c4dff', '#0ea5e9', '#12b886', '#f59f00', '#f06595', '#fa5252', '#495057'];
+const hasAcct = (user) => store.mode === 'cloud' && !!user.email;
+const acctId = (user) => (hasAcct(user) ? user.email.replace(/@studydrive\.id$/, '') : '');
+const profileOf = (user) => { const p = S.profile || {}; return { name: p.name || (hasAcct(user) ? acctId(user).split('@')[0] : store.mode === 'cloud' ? '게스트' : '나'), emoji: p.emoji || '🙂', color: p.color || '#3451c7', bio: p.bio || '' }; };
+const avatarHtml = (pf, cls = '') => `<span class="avatar ${cls}" style="--c:${pf.color}">${esc(pf.emoji)}</span>`;
+let curUser = null;
+
 function renderNav(user, active) {
+  curUser = user;
   const on = (k) => (active === k || (k === 'files' && active === 'f') ? 'on' : '');
+  const pf = profileOf(user);
   nav.innerHTML = `
     <div class="brand">${logo(26)} <span>스터디드라이브</span></div>
+    <button class="profile" id="pfbtn" aria-label="내 프로필">${avatarHtml(pf)}<span class="pf-t"><b>${esc(pf.name)}</b><small>${esc(pf.bio || (hasAcct(user) ? acctId(user) : store.mode === 'cloud' ? '게스트 체험 중' : '이 기기에만 저장'))}</small></span><i>${ico('pen', 14)}</i></button>
     <a href="#/files" class="${on('files')}"><i>${ico('folder')}</i><span>내 파일</span></a>
     <a href="#/review" class="${on('review')}"><i>${ico('repeat')}</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
     <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>${ico('book')}</i><span>오답노트</span></a>
     <a href="#/explore" class="${on('explore')}"><i>${ico('compass')}</i><span>둘러보기</span></a>
-    ${store.mode === 'cloud' ? `<button class="btn sm navsync" id="syncbtn">${ico('link', 16)} 다른 기기로 열기</button>` : ''}
-    <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' && !user.email ? '<button class="btn sm" id="upgrade">계정 만들기 (데이터 보존)</button>' : ''}${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
-  $('#upgrade')?.addEventListener('click', () => {
-    const d = $('#dlg');
-    d.innerHTML = `<form class="dlg-body"><h3>계정 만들기</h3><p class="muted">지금까지의 파일·필기·오답을 그대로 유지한 채 내 계정으로 바꿔요.</p>
-      <label>이메일<input name="email" type="email" required autocomplete="email"></label>
-      <label>비밀번호 (6자 이상)<input name="pw" type="password" minlength="6" required autocomplete="new-password"></label>
-      <div class="row end"><button type="button" class="btn ghost" data-x>취소</button><button class="btn primary">계정 만들기</button></div></form>`;
-    d.showModal();
-    const f = $('form', d); f.email.focus();
-    $('[data-x]', d).onclick = () => d.close();
-    f.onsubmit = async (e) => {
-      e.preventDefault();
-      try { await store.auth.upgrade(f.email.value.trim(), f.pw.value); d.close(); toast('확인 메일을 보냈어요. 메일의 링크를 누르면 계정이 완성돼요.', 6000); } catch (er) { toast(er.message, 5000); }
-    };
-  });
+    ${store.mode === 'cloud' ? `<button class="btn sm navsync" id="syncbtn">${ico('link', 16)} 다른 기기로 열기</button>` : '<em class="localnote">이 기기에만 저장 중</em>'}`;
+  const mp = $('#mprofile'); if (mp) { mp.hidden = false; mp.innerHTML = avatarHtml(pf); }
+  $('#pfbtn')?.addEventListener('click', () => openProfile(user));
   $('#syncbtn')?.addEventListener('click', openLinkDialog);
-  $('#logout')?.addEventListener('click', async () => { if (!user.email && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; await store.auth.signOut(); route.loaded = false; route(); });
   store.mistakes.list().then((m) => { mistakes = m; badge(); }).catch(() => {});
+}
+function openProfile(user = curUser) {
+  if (!user) return;
+  const pf = { ...profileOf(user) }, d = $('#dlg'), guest = store.mode === 'cloud' && !user.email;
+  d.className = '';
+  d.innerHTML = `<form class="dlg-body profile-dlg">
+    <div class="pf-head"><span id="pfav">${avatarHtml(pf, 'big')}</span><div><h3>내 프로필</h3><small class="muted">${esc(store.mode === 'cloud' ? (hasAcct(user) ? `아이디: ${acctId(user)}` : '게스트 계정 (이 브라우저에 저장)') : '이 기기에서만 쓰는 로컬 모드')}</small></div></div>
+    <label>닉네임<input name="name" maxlength="14" value="${esc(pf.name)}" placeholder="닉네임"></label>
+    <label>한 줄 소개<input name="bio" maxlength="40" value="${esc(pf.bio)}" placeholder="예: 토익 900 · 12월 시험"></label>
+    <div class="pf-sec">아이콘</div><div class="emojis av">${AVATARS.map((e) => `<button type="button" class="emo${e === pf.emoji ? ' on' : ''}" data-e="${e}" aria-label="아이콘 ${e}">${e}</button>`).join('')}</div>
+    <div class="pf-sec">색상</div><div class="swatches">${PCOLORS.map((c) => `<button type="button" class="sw${c === pf.color ? ' on' : ''}" data-c="${c}" style="--c:${c}" aria-label="색상"></button>`).join('')}</div>
+    <details class="pf-more"><summary>학습 설정</summary>
+      <div class="row goal"><label>시험일<input type="date" name="gdate" value="${esc(S.goal?.date || '')}"></label><label>목표 점수<input type="number" name="gtarget" min="10" max="990" step="5" placeholder="예: 900" value="${esc(S.goal?.target || '')}"></label></div>
+      <div class="pf-sec">복습 주기</div><div class="chips" id="pfpresets">${Object.entries(PRESETS).map(([k, p]) => `<button type="button" class="chip${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? ' on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>
+    </details>
+    ${store.mode === 'cloud' ? `<div class="pf-sec">계정</div><div class="row">${guest ? '<button type="button" class="btn" id="pfup">계정 만들기 (데이터 그대로)</button>' : ''}<button type="button" class="btn ghost" id="pflogout">로그아웃</button></div>` : ''}
+    <div class="row end"><button type="button" class="btn ghost" data-x>닫기</button><button class="btn primary">저장</button></div></form>`;
+  d.showModal();
+  const f = $('form', d); let em = pf.emoji, col = pf.color, iv = S.intervals;
+  const paint = () => { $('#pfav', d).innerHTML = avatarHtml({ emoji: em, color: col }, 'big'); };
+  $$('.av .emo', d).forEach((b) => (b.onclick = () => { em = b.dataset.e; $$('.av .emo', d).forEach((x) => x.classList.toggle('on', x === b)); paint(); }));
+  $$('.sw', d).forEach((b) => (b.onclick = () => { col = b.dataset.c; $$('.sw', d).forEach((x) => x.classList.toggle('on', x === b)); paint(); }));
+  $$('#pfpresets .chip', d).forEach((c) => (c.onclick = () => { iv = PRESETS[c.dataset.p].intervals; $$('#pfpresets .chip', d).forEach((x) => x.classList.toggle('on', x === c)); }));
+  $('[data-x]', d).onclick = () => d.close();
+  $('#pflogout', d)?.addEventListener('click', async () => { if (guest && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; d.close(); await store.auth.signOut(); route.loaded = false; route(); });
+  $('#pfup', d)?.addEventListener('click', () => { d.close(); upgradeDialog(); });
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    S.profile = { name: f.name.value.trim(), bio: f.bio.value.trim(), emoji: em, color: col };
+    S.goal = { date: f.gdate.value, target: f.gtarget.value }; S.intervals = iv; saveS();
+    d.close(); renderNav(user, (location.hash.replace(/^#\/?/, '').split('/')[0]) || 'files'); toast('프로필을 저장했어요');
+    if ($('#grid')) drawFiles();
+  };
+}
+function upgradeDialog() {
+  const d = $('#dlg'); d.className = '';
+  d.innerHTML = `<form class="dlg-body"><h3>계정 만들기</h3><p class="muted">지금까지의 파일·필기·오답을 그대로 유지한 채 내 계정으로 바꿔요. <b>이메일 없이</b> 아이디만 정하면 돼요.</p>
+    <label>아이디 (영문 소문자·숫자·_ 3~20자)<input name="id" required autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9_]{3,20}"></label>
+    <label>비밀번호 (6자 이상)<input name="pw" type="password" minlength="6" required autocomplete="new-password"></label>
+    <div class="row end"><button type="button" class="btn ghost" data-x>취소</button><button class="btn primary">계정 만들기</button></div></form>`;
+  d.showModal();
+  const f = $('form', d); f.id.focus(); $('[data-x]', d).onclick = () => d.close();
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await store.auth.upgrade(f.id.value.trim(), f.pw.value); d.close(); toast('계정이 만들어졌어요! 이제 이 아이디로 어디서든 로그인할 수 있어요', 5000); route.loaded = false; route(); } catch (er) { toast(er.message, 5000); }
+  };
 }
 function badge() { const b = $('#due-badge'); if (b) { const n = due().length; b.hidden = !n; b.textContent = n; } }
 
@@ -213,10 +256,10 @@ function authView() {
         </div>
         <form id="af" class="lp-card glass">
           <h2>로그인</h2>
-          <label class="vh2" for="em">이메일</label><input id="em" type="email" name="email" placeholder="이메일" required autocomplete="email">
+          <label class="vh2" for="em">아이디</label><input id="em" type="text" name="email" placeholder="아이디 (또는 이메일)" required autocomplete="username" autocapitalize="none" spellcheck="false">
           <label class="vh2" for="pw">비밀번호</label><input id="pw" type="password" name="pw" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password">
           <div class="row"><button class="btn primary grow" data-m="in">로그인</button><button class="btn grow" type="button" data-m="up">회원가입</button></div>
-          <small>계정이 없어도 왼쪽 <b>가입 없이 체험하기</b>로 바로 써 볼 수 있어요.</small>
+          <small>아이디는 영문 소문자·숫자·밑줄(_) 3~20자. 이메일 없이 만들 수 있어요.<br>계정이 없어도 <b>가입 없이 체험하기</b>로 바로 써 볼 수 있어요.</small>
         </form>
       </section>
       <section class="lp-sync glass">
@@ -854,48 +897,77 @@ function plan(m, r) {
   if (ns >= I.length) return { stage: ns, graduated: true };
   return { stage: ns, days: I[ns], next_review: today(I[ns]) };
 }
+let started = false;
+const FACES = { again: '😵', hard: '😅', good: '🙂', easy: '😎' };
+const reasonHue = (r) => [...String(r || '')].reduce((a, c) => a + c.charCodeAt(0) * 7, 0) % 360;
 async function reviewView() {
-  view.innerHTML = '<p class="muted pad">불러오는 중…</p>';
+  view.innerHTML = '<div id="rv" class="narrow"><div class="skel card" style="min-height:280px"><i></i><i></i><i></i></div></div>';
   try { mistakes = await store.mistakes.list(); if (!files.length) files = await store.files.list(); } catch (e) { view.innerHTML = `<p class="pad muted">${esc(e.message)}</p>`; return; }
   badge();
-  queue = due(); qi = 0; done = {}; sessionLog = []; conf = null; revealed = false;
-  view.innerHTML = '<div id="rv" class="narrow"></div>';
+  queue = due(); qi = 0; done = {}; sessionLog = []; conf = null; revealed = false; started = false;
   drawReview();
 }
 function drawReview() {
   const rv = $('#rv'); if (!rv) return;
-  if (!queue.length || qi >= queue.length) {
-    const nxt = mistakes.filter((m) => !m.graduated).map((m) => m.next_review).sort()[0];
-    const tot = Object.values(done).reduce((a, b) => a + b, 0);
-    if (queue.length) setTimeout(() => confetti(), 120);
-    rv.innerHTML = `<div class="empty"><div>${queue.length ? '🎉' : '✅'}</div><h2>${queue.length ? '오늘 복습 끝!' : '오늘 복습할 오답이 없어요'}</h2>
-      ${queue.length ? `<p>${tot}개 완료 · 🔥 연속 ${streak()}일</p>${insightHtml()}` : ''}<p class="muted">${nxt ? `다음 복습: ${nxt}` : '파일을 풀다가 틀린 문제를 오답 등록해 보세요.'}</p>
-      <div class="row" style="justify-content:center"><a class="btn" href="#/quiz">🎯 AI 맞춤 퀴즈</a><a class="btn primary" href="#/files">내 파일로</a></div></div>`;
+  const n = queue.length;
+  const nxt = mistakes.filter((m) => !m.graduated).map((m) => m.next_review).sort()[0];
+  if (!n) {
+    rv.innerHTML = `<section class="rv-done"><div class="rv-trophy">🌿</div><h2>오늘 복습할 오답이 없어요</h2>
+      <p class="muted">${nxt ? `다음 복습은 <b>${esc(nxt)}</b>에 있어요.` : '파일을 풀다가 틀린 문제를 오답 등록하면 여기로 모여요.'}</p>
+      <div class="row" style="justify-content:center"><a class="btn" href="#/quiz">🎯 AI 맞춤 퀴즈</a><a class="btn primary" href="#/files">내 파일로</a></div></section>`;
     return;
   }
-  const m = queue[qi];
+  if (!started) {
+    const by = {}; queue.forEach((m) => { by[m.reason || '기타'] = (by[m.reason || '기타'] || 0) + 1; });
+    rv.innerHTML = `<section class="rv-intro">
+      <div class="rv-ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="bg"/><circle cx="60" cy="60" r="52" class="fg"/></svg><div><b data-count="${n}">0</b><span>장</span></div></div>
+      <h2>오늘의 복습</h2>
+      <p class="muted">약 ${Math.max(1, Math.round(n * 0.8))}분 · 🔥 ${streak()}일째 이어가는 중</p>
+      <div class="rv-reasons">${Object.entries(by).map(([r, c]) => `<span style="--h:${reasonHue(r)}">${esc(r)} <b>${c}</b></span>`).join('')}</div>
+      <button class="btn primary lg" id="rvstart">복습 시작 →</button>
+      <small class="muted">정답을 먼저 떠올려 적은 뒤 확인하면 기억에 더 오래 남아요</small>
+    </section>`;
+    countUp($('[data-count]', rv), n);
+    $('#rvstart').addEventListener('click', () => { started = true; drawReview(); });
+    return;
+  }
+  if (qi >= n) {
+    const tot = Object.values(done).reduce((a, b) => a + b, 0), mx = Math.max(1, ...Object.values(done));
+    setTimeout(() => confetti(), 120);
+    rv.innerHTML = `<section class="rv-done"><div class="rv-trophy">🎉</div><h2>오늘 복습 끝!</h2>
+      <p class="muted">${tot}개 완료 · 🔥 ${streak()}일째</p>
+      <div class="rv-bars">${RATINGS.map(([k, l, c]) => `<div class="${c}"><span>${FACES[k]} ${l}</span><i style="--w:${((done[k] || 0) / mx) * 100}%"></i><b>${done[k] || 0}</b></div>`).join('')}</div>
+      ${insightHtml()}
+      <p class="muted">${nxt ? `다음 복습은 <b>${esc(nxt)}</b>` : '모든 오답을 마스터했어요!'}</p>
+      <div class="row" style="justify-content:center"><a class="btn" href="#/quiz">🎯 AI 맞춤 퀴즈</a><a class="btn primary" href="#/files">내 파일로</a></div></section>`;
+    return;
+  }
+  const m = queue[qi], h = reasonHue(m.reason);
   rv.innerHTML = `
-    <div class="prog"><div style="width:${(qi / queue.length) * 100}%"></div></div>
-    <p class="muted">${qi + 1} / ${queue.length} · ${(m.stage || 0) + 1}번째 복습</p>
-    <article class="card big">
-      <h2>${esc(m.label)}</h2>
-      <p class="muted">${esc(m.file_name || '')} ${m.page ? `· ${m.page}쪽` : ''} · <span class="badge">${esc(m.reason)}</span></p>
-      ${m.memo ? P('📝 ' + m.memo) : ''}
-      <div class="conf" role="group" aria-label="확신도"><small class="muted">내 확신도</small>${[['sure', '확실해요'], ['half', '반반이에요'], ['unsure', '모르겠어요']].map(([k, l]) => `<button class="chip" data-c="${k}">${l}</button>`).join('')}</div>
-      <textarea id="recall" rows="2" placeholder="답이나 핵심을 먼저 떠올려 적어 보세요 (선택)"></textarea>
-      <button class="btn" id="reveal">정답 확인</button>
-      <div class="row">${m.file_id ? `<a class="btn" href="#/f/${m.file_id}?p=${m.page || 1}">원본 열기</a>` : ''}
-        ${m.ai ? '' : '<button class="btn" id="mkai">🤖 AI 해설 받기</button>'}</div>
+    <div class="rv-top"><button class="lnk" id="rvquit">← 나가기</button>
+      <div class="rv-dots" aria-label="진행">${queue.map((_, i) => `<i class="${i < qi ? 'done' : i === qi ? 'cur' : ''}"></i>`).join('')}</div><small>${qi + 1}/${n}</small></div>
+    <article class="card big rvcard" style="--rc:hsl(${h} 68% 52%)">
+      <div class="rv-tag"><span class="rv-reason">${esc(m.reason || '기타')}</span><small>${(m.stage || 0) + 1}번째 복습</small></div>
+      <h2 class="rv-title">${esc(m.label)}</h2>
+      ${m.file_name ? `<p class="rv-src">📄 ${esc(m.file_name.replace(/\.(md|txt)$/i, ''))}${m.page ? ` · ${m.page}쪽` : ''}</p>` : ''}
+      ${m.memo ? `<p class="rv-memo pre">${esc(m.memo)}</p>` : ''}
+      <div class="rv-q">
+        <p class="rv-hint">먼저 답을 떠올려 보세요</p>
+        <div class="conf" role="group" aria-label="확신도"><small class="muted">내 확신도</small>${[['sure', '확실해요'], ['half', '반반이에요'], ['unsure', '모르겠어요']].map(([k, l]) => `<button class="chip" data-c="${k}">${l}</button>`).join('')}</div>
+        <textarea id="recall" rows="3" placeholder="답이나 핵심을 적어 보세요 (선택)"></textarea>
+        <div class="row"><button class="btn primary" id="reveal">정답 확인</button>${m.file_id ? `<a class="btn" href="#/f/${m.file_id}?p=${m.page || 1}">원본 열기</a>` : ''}${m.ai ? '' : '<button class="btn" id="mkai">🤖 AI 해설 받기</button>'}</div>
+      </div>
       <div id="ans" hidden>${m.ai ? aiHtml(m.ai) : P(m.memo || '저장된 해설이 없어요. 원본에서 확인해 보세요.')}</div>
     </article>
     <p class="muted center" id="ratehint">정답을 확인한 뒤, 얼마나 잘 기억났는지 골라 주세요</p>
-    <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}" ${revealed ? '' : 'disabled'}><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
+    <div class="rates rates4">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}" ${revealed ? '' : 'disabled'}><span class="face">${FACES[k]}</span><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
+  $('#rvquit').addEventListener('click', () => { location.hash = '#/files'; });
   $('#mkai')?.addEventListener('click', () => explain(m));
   $$('.conf .chip', rv).forEach((b) => b.addEventListener('click', () => { conf = b.dataset.c; $$('.conf .chip', rv).forEach((x) => x.classList.toggle('on', x === b)); }));
   $('#reveal')?.addEventListener('click', async () => {
     const myQi = qi;
     const recall = $('#recall')?.value.trim();
-    $('#ans').hidden = false; $('#reveal').hidden = true; unlockRates();
+    $('#ans').hidden = false; $('.rv-q')?.classList.add('revealed'); $('#reveal').hidden = true; unlockRates();
     const expected = m.ai?.answer || m.memo;
     if (!recall || !expected) return;
     const fb = document.createElement('p'); fb.className = 'samplenote'; fb.textContent = '🤖 내 답을 채점하는 중…'; $('#ans').prepend(fb);
@@ -1048,12 +1120,12 @@ async function registerQuizMiss(q) {
 async function exploreView() {
   try { [files, mistakes] = await Promise.all([store.files.list(), store.mistakes.list()]); } catch {}
   badge();
-  const st = steps();
+  const st = steps(), pf = profileOf(curUser || {});
   const hasSample = files.some((f) => (f.tags || []).includes('예시')) || mistakes.some((m) => m.label?.startsWith('[예시]'));
   view.innerHTML = `
-    <section class="hero">
-      <h1>시작해 볼까요? 🚀</h1>
-      <p>아래에서 하나만 고르면 바로 세팅돼요.</p>
+    <section class="hero soft">
+      <small class="hello">${esc(pf.emoji)} 안녕하세요, ${esc(pf.name)}님</small>
+      <h1>오늘은 어떤 공부를 해 볼까요?</h1>
       <div class="steps">${STEP_LABEL.map((l, i) => `<div class="step ${st[i] ? 'ok' : ''}"><i>${st[i] ? '✓' : i + 1}</i><span>${l}</span></div>`).join('')}</div>
     </section>
 
@@ -1061,16 +1133,15 @@ async function exploreView() {
     <section class="card syncdemo">
       <div class="sd-copy">
         <h3>${ico('link', 20)} 기기 간 동기화 — 직접 확인해 보세요</h3>
-        <p>한쪽에서 필기하거나 오답을 등록하면 <b>다른 기기에 새로고침 없이 바로</b> 나타나요.</p>
-        <ol><li>아래 버튼으로 QR을 띄우고, 폰·태블릿 카메라로 찍어요.</li><li>PC에서 PDF를 열고, 폰에서도 같은 파일을 열어요.</li><li>한쪽에서 필기해 보세요. 다른 쪽에 바로 나타나요.</li></ol>
+        <p>한쪽에서 필기하거나 오답을 등록하면 <b>다른 기기에 새로고침 없이 바로</b> 나타나요. 같은 파일을 두 기기에서 열고 함께 써 보세요.</p>
         <div class="row"><button class="btn primary" id="linkbtn">📲 QR로 다른 기기 연결하기</button><span class="devs" id="devlist">${devList()}</span></div>
       </div>
       <svg class="sd-art" viewBox="0 0 300 150" aria-hidden="true"><use href="#syncart"/></svg>
-    </section>` : `<section class="card syncdemo"><div class="sd-copy"><h3>${ico('link', 20)} 기기 간 동기화</h3><p>로그인(또는 가입 없이 체험)하면 PC·태블릿·폰이 같은 계정으로 실시간 동기화돼요.</p></div></section>`}
+    </section>` : ''}
 
     <h3 class="sec">한 번에 시작하기</h3>
-    <div class="tpls">${TEMPLATES.map((t) => `
-      <article class="card tpl ${S.tpl === t.id ? 'active' : ''}">
+    <div class="tpls">${TEMPLATES.map((t, i) => `
+      <article class="card tpl t${i} ${S.tpl === t.id ? 'active' : ''}">
         <div class="te">${t.emoji}</div>
         <h3>${esc(t.title)}</h3>
         <p class="muted">${esc(t.short)}</p>
@@ -1081,18 +1152,10 @@ async function exploreView() {
 
     <h3 class="sec">이렇게 써요</h3>
     <div class="scen">${SCENARIOS.map((s) => `<a class="card sc" href="${s.href}"><span class="te">${s.emoji}</span><div><b>${esc(s.title)}</b><p class="muted">${esc(s.body)}</p></div></a>`).join('')}</div>
-
-    <h3 class="sec">목표</h3>
-    <div class="row goal"><label>시험일 <input type="date" id="goaldate" value="${esc(S.goal?.date || '')}"></label><label>목표 점수 <input type="number" id="goaltarget" min="10" max="990" step="5" placeholder="예: 900" value="${esc(S.goal?.target || '')}"></label></div>
-
-    <h3 class="sec">복습 주기</h3>
-    <div class="chips" id="presets">${Object.entries(PRESETS).map(([k, p]) => `<button class="chip ${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? 'on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>`;
+    <p class="muted center tip">시험일·목표 점수·복습 주기는 왼쪽 위 <b>프로필</b>에서 바꿀 수 있어요.</p>`;
   $$('[data-tpl]').forEach((b) => (b.onclick = () => applyTemplate(TEMPLATES.find((t) => t.id === b.dataset.tpl))));
   $('#rmsample')?.addEventListener('click', removeSamples);
   $('#linkbtn')?.addEventListener('click', openLinkDialog);
-  const setGoal = () => { S.goal = { date: $('#goaldate').value, target: $('#goaltarget').value }; saveS(); };
-  $('#goaldate')?.addEventListener('change', setGoal); $('#goaltarget')?.addEventListener('change', setGoal);
-  $$('#presets .chip').forEach((c) => (c.onclick = () => { S.intervals = PRESETS[c.dataset.p].intervals; saveS(); toast('복습 주기를 바꿨어요'); exploreView(); }));
 }
 
 async function applyTemplate(t) {
@@ -1137,5 +1200,6 @@ async function removeSamples() {
 }
 
 $('#sync')?.addEventListener('click', openLinkDialog);
+$('#mprofile')?.addEventListener('click', () => openProfile());
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 route();

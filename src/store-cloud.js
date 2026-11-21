@@ -6,6 +6,10 @@ const ok = ({ data, error }) => {
   return data;
 };
 
+const ID_RE = /^[a-z0-9_]{3,20}$/;
+const isId = (v) => !String(v).includes('@');
+const toEmail = (v) => (isId(v) ? `${String(v).trim().toLowerCase()}@studydrive.id` : String(v).trim());
+
 export function cloud(cfg) {
   let liveCh = null;
   const sb = createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true } });
@@ -68,13 +72,32 @@ export function cloud(cfg) {
     mode: 'cloud',
     auth: {
       async user() { return (await session())?.user ?? null; },
-      async signIn(email, password) { ok(await sb.auth.signInWithPassword({ email, password })); },
-      async signUp(email, password) {
-        const d = ok(await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }));
+      async signIn(idOrEmail, password) { ok(await sb.auth.signInWithPassword({ email: toEmail(idOrEmail), password })); },
+      async signUp(idOrEmail, password) {
+        if (isId(idOrEmail)) {
+          const id = String(idOrEmail).trim().toLowerCase();
+          if (!ID_RE.test(id)) throw new Error('아이디는 영문 소문자·숫자·밑줄(_) 3~20자로 만들어 주세요');
+          if (password.length < 6) throw new Error('비밀번호는 6자 이상이어야 해요');
+          const { data, error } = await sb.functions.invoke('account', { body: { action: 'signup', username: id, password } });
+          if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch {} throw new Error(m); }
+          if (data?.error) throw new Error(data.error);
+          ok(await sb.auth.signInWithPassword({ email: toEmail(id), password }));
+          return;
+        }
+        const d = ok(await sb.auth.signUp({ email: idOrEmail, password, options: { emailRedirectTo: location.origin + location.pathname } }));
         if (!d.session) throw new Error('가입 확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.');
       },
       async signInAnon() { ok(await sb.auth.signInAnonymously()); },
-      async upgrade(email, password) { ok(await sb.auth.updateUser({ email, password }, { emailRedirectTo: location.origin + location.pathname })); },
+      async upgrade(idOrEmail, password) {
+        if (!isId(idOrEmail)) { ok(await sb.auth.updateUser({ email: idOrEmail, password }, { emailRedirectTo: location.origin + location.pathname })); return; }
+        const id = String(idOrEmail).trim().toLowerCase();
+        if (!ID_RE.test(id)) throw new Error('아이디는 영문 소문자·숫자·밑줄(_) 3~20자로 만들어 주세요');
+        if (password.length < 6) throw new Error('비밀번호는 6자 이상이어야 해요');
+        const { data, error } = await sb.functions.invoke('account', { body: { action: 'upgrade', username: id, password } });
+        if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch {} throw new Error(m); }
+        if (data?.error) throw new Error(data.error);
+        ok(await sb.auth.refreshSession());
+      },
       signOut: () => sb.auth.signOut(),
       // 시연용 기기 연결: 현재 로그인 세션의 갱신 토큰을 QR(주소의 # 부분)로 다른 기기에 전달. 서버로 전송되지 않음.
       async linkUrl() {
