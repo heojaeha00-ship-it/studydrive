@@ -3,7 +3,7 @@ import { openDoc, toJpegB64 } from './pdf.js';
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#111827', '#f59e0b'];
 
-export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAddPage }) {
+export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent, onAppend }) {
   const type = kind(row.name, row.mime);
   const isPaged = type === 'pdf' || type === 'image';
   root.innerHTML = `
@@ -18,7 +18,6 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
         <button class="tool" data-tool="eraser" title="지우개">🧽</button>
         <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}</span>
         <button class="tool" data-a="undo" title="되돌리기">↩️</button>
-        ${row.tags?.includes('노트') ? '<button class="tool" data-a="addpage" title="쪽 추가">＋쪽</button>' : ''}
         <button class="tool" data-a="zoomout" title="축소">－</button>
         <button class="tool" data-a="zoomin" title="확대">＋</button>
         <span class="pg" id="pg">1 / 1</span>
@@ -90,7 +89,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   const W = () => Math.max(260, Math.min(scroller.clientWidth - 24, 1000) * zoom);
   const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
 
-  for (let n = 1; n <= total; n++) {
+  function addPageEl(n) {
     const wrap = document.createElement('div');
     wrap.className = 'vpage';
     wrap.dataset.n = n;
@@ -99,6 +98,26 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     const o = { n, wrap, base: $('.base', wrap), ov: $('.ov', wrap), rw: 0, ratio, task: null };
     objs.push(o);
     bindDraw(o);
+    return o;
+  }
+  for (let n = 1; n <= total; n++) addPageEl(n);
+
+  // 노트: 맨 아래까지 내리면 새 페이지가 자동으로 붙어요 (삼성 노트 PDF처럼)
+  const isNote = type === 'pdf' && row.tags?.includes('노트') && !!onAppend;
+  let adding = false, lastAdd = 0;
+  async function maybeAppend() {
+    if (!isNote || adding || destroyed || total >= 300) return;
+    if (scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 80) return;
+    if (Date.now() - lastAdd < 800) return;
+    adding = true;
+    try {
+      const { blob: nb, count } = await onAppend();
+      doc = await openDoc(nb);
+      for (let n = total + 1; n <= count; n++) { const o = addPageEl(n); o.wrap.style.width = W() + 'px'; o.wrap.style.height = W() * o.ratio + 'px'; io.observe(o.wrap); }
+      total = count;
+      updateCurrent();
+    } catch (e) { toast('쪽 추가 실패: ' + e.message); }
+    finally { adding = false; lastAdd = Date.now(); }
   }
 
   function layout() {
@@ -209,7 +228,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     if (pg) pg.textContent = `${current} / ${total}`;
   }
   let sraf = 0;
-  scroller.addEventListener('scroll', () => { if (!sraf) sraf = requestAnimationFrame(() => { sraf = 0; updateCurrent(); }); });
+  scroller.addEventListener('scroll', () => { if (!sraf) sraf = requestAnimationFrame(() => { sraf = 0; updateCurrent(); maybeAppend(); }); });
 
   function setZoom(z) {
     const frac = scroller.scrollTop / Math.max(1, scroller.scrollHeight);
@@ -225,7 +244,6 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     if (c) { color = c.dataset.color; $$('.dot', root).forEach((d) => d.classList.toggle('on', d === c)); if (tool === 'scroll' || tool === 'eraser') setTool('pen'); return; }
     const a = e.target.closest('[data-a]')?.dataset.a;
     if (a === 'back') onBack();
-    if (a === 'addpage') onAddPage?.();
     if (a === 'zoomin') setZoom(zoom + 0.2);
     if (a === 'zoomout') setZoom(zoom - 0.2);
     if (a === 'undo') {

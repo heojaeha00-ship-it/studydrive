@@ -213,10 +213,9 @@ function noteDialog() {
   d.innerHTML = `
     <form class="dlg-body">
       <h3>📝 새 노트 만들기</h3>
-      <p class="muted">빈 PDF 노트를 만들어 바로 필기할 수 있어요. 어느 기기에서든 이어서 써요.</p>
+      <p class="muted">빈 PDF 노트예요. 맨 아래까지 내리면 새 페이지가 자동으로 붙어요.</p>
       <label>제목<input name="title" value="새 노트 ${d0}" required></label>
       <label>종이<select name="paper">${Object.entries(PAPERS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-      <label>쪽수<input name="pages" type="number" min="1" max="50" value="10"></label>
       <div class="row end"><button type="button" class="btn ghost" data-x>취소</button><button class="btn primary">만들기</button></div>
     </form>`;
   d.showModal();
@@ -224,13 +223,13 @@ function noteDialog() {
   $('[data-x]', d).onclick = () => d.close();
   f.onsubmit = async (e) => {
     e.preventDefault();
-    const title = f.title.value.trim().replace(/[\\/:*?"<>|]/g, '-') || '새 노트', paper = f.paper.value, pages = Math.max(1, Math.min(50, Number(f.pages.value) || 10));
+    const title = f.title.value.trim().replace(/[\\/:*?"<>|]/g, '-') || '새 노트', paper = f.paper.value;
     d.close();
     const t = toast('📝 노트를 만드는 중…', 0);
     try {
-      const blob = await makeNotePdf({ paper, pages });
+      const blob = await makeNotePdf({ paper, pages: 1 });
       let row = await store.files.add(new File([blob], `${title}.pdf`, { type: 'application/pdf' }));
-      row = await store.files.update(row, { category: '노트', tags: ['노트', PAPERS[paper]], summary: `직접 만든 ${PAPERS[paper]} ${pages}쪽` });
+      row = await store.files.update(row, { category: '노트', tags: ['노트', PAPERS[paper]], summary: `직접 만든 ${PAPERS[paper]}` });
       files.unshift(row); t.close();
       location.hash = `#/f/${row.id}`;
     } catch (er) { t.close(); toast('노트 만들기 실패: ' + er.message, 5000); }
@@ -241,20 +240,19 @@ function noteDialog() {
 async function viewerView(id, page) {
   document.body.classList.add('viewer-mode');
   if (!files.length) try { files = await store.files.list(); } catch {}
-  const row = files.find((f) => f.id === id);
+  let row = files.find((f) => f.id === id);
   if (!row) { view.innerHTML = '<p class="pad muted">파일을 찾을 수 없어요. <a href="#/files">목록으로</a></p>'; return; }
   view.innerHTML = '<div class="viewer"></div>';
   viewer = await mountViewer($('.viewer'), {
     store, row, page,
     onBack: () => (location.hash = '#/files'),
     onEvent: flag,
-    onAddPage: async () => {
-      try {
-        const { blob, count } = await addPages(await store.files.blob(row), paperKey(row.tags), 1);
-        const n = await store.files.replace(row, blob);
-        files = files.map((f) => (f.id === n.id ? n : f));
-        location.hash = `#/f/${row.id}?p=${count}`; route();
-      } catch (e) { toast('쪽 추가 실패: ' + e.message); }
+    onAppend: async () => {
+      const cur = files.find((f) => f.id === id) || row;
+      const { blob, count } = await addPages(await store.files.blob(cur), paperKey(cur.tags), 1);
+      const n = await store.files.replace(cur, blob);
+      files = files.map((f) => (f.id === n.id ? n : f));
+      return { blob, count };
     },
     onMistake: (ctx) => mistakeDialog({ file: row, ...ctx }),
   });
@@ -452,38 +450,31 @@ async function quizView() {
 async function exploreView() {
   try { [files, mistakes] = await Promise.all([store.files.list(), store.mistakes.list()]); } catch {}
   badge();
-  const st = steps(), dn = st.filter(Boolean).length;
+  const st = steps();
   const hasSample = files.some((f) => (f.tags || []).includes('예시')) || mistakes.some((m) => m.label?.startsWith('[예시]'));
   view.innerHTML = `
     <section class="hero">
-      <h1>처음이세요? 3분이면 시작해요 🚀</h1>
-      <p>아래에서 나에게 맞는 세팅을 <b>한 번만 누르면</b> 폴더·복습 주기·예시 문제가 알아서 만들어져요.</p>
+      <h1>시작해 볼까요? 🚀</h1>
+      <p>아래에서 하나만 고르면 바로 세팅돼요.</p>
       <div class="steps">${STEP_LABEL.map((l, i) => `<div class="step ${st[i] ? 'ok' : ''}"><i>${st[i] ? '✓' : i + 1}</i><span>${l}</span></div>`).join('')}</div>
-      <small>${dn}/4 완료</small>
     </section>
 
-    <h3 class="sec">① 원클릭 시작 세팅</h3>
+    <h3 class="sec">한 번에 시작하기</h3>
     <div class="tpls">${TEMPLATES.map((t) => `
       <article class="card tpl ${S.tpl === t.id ? 'active' : ''}">
         <div class="te">${t.emoji}</div>
-        <h3>${esc(t.title)}</h3><p class="muted who">${esc(t.who)}</p>
-        <p>${esc(t.desc)}</p>
-        <div class="meta">${t.cats.map((c) => `<span class="badge">${esc(c)}</span>`).join('')}</div>
-        <ol class="howto">${t.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
-        <p class="muted"><small>복습 주기 ${PRESETS[t.preset].intervals.join('·')}일 · 예시 노트 ${t.notes.length}개 · 예시 오답 ${t.mistakes.length}개</small></p>
-        <button class="btn ${S.tpl === t.id ? '' : 'primary'}" data-tpl="${t.id}">${S.tpl === t.id ? '다시 적용하기' : '이 세팅으로 시작하기'}</button>
+        <h3>${esc(t.title)}</h3>
+        <p class="muted">${esc(t.short)}</p>
+        <button class="btn ${S.tpl === t.id ? '' : 'primary'}" data-tpl="${t.id}">${S.tpl === t.id ? '적용됨 ✓' : '시작하기'}</button>
       </article>`).join('')}
-      <article class="card tpl"><div class="te">📤</div><h3>내 자료로 바로 시작</h3><p class="muted who">세팅 없이 가볍게</p><p>가지고 있는 PDF나 사진을 올리면 AI가 알아서 폴더와 태그를 붙여 줘요.</p><a class="btn" href="#/files">파일 올리러 가기</a></article>
     </div>
-    ${hasSample ? '<div class="row" style="margin:10px 0 0"><button class="btn ghost" id="rmsample">🧹 예시 데이터 지우기</button><small class="muted">예시 노트·예시 오답만 삭제돼요. 내 파일은 그대로예요.</small></div>' : ''}
+    ${hasSample ? '<div class="row" style="margin-top:10px"><button class="btn ghost sm" id="rmsample">🧹 예시 데이터 지우기</button></div>' : ''}
 
-    <h3 class="sec">② 이렇게도 쓸 수 있어요</h3>
-    <div class="scen">${SCENARIOS.map((s) => `<a class="card sc" href="${s.href}"><div class="te">${s.emoji}</div><h3>${esc(s.title)}</h3><p class="muted">${esc(s.body)}</p><span class="lnk">${esc(s.cta)} →</span></a>`).join('')}</div>
+    <h3 class="sec">이렇게 써요</h3>
+    <div class="scen">${SCENARIOS.map((s) => `<a class="card sc" href="${s.href}"><span class="te">${s.emoji}</span><div><b>${esc(s.title)}</b><p class="muted">${esc(s.body)}</p></div></a>`).join('')}</div>
 
-    <h3 class="sec">③ 내 학습 설정</h3>
-    <div class="card"><p><b>복습 주기</b> <small class="muted">— 오답을 다시 보여 주는 간격이에요</small></p>
-      <div class="chips" id="presets">${Object.entries(PRESETS).map(([k, p]) => `<button class="chip ${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? 'on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>
-      <p class="muted"><small>복습할 때 [다시·어려움·좋음·쉬움]을 고르면 다음 복습일이 자동으로 정해져요. 시험이 가까우면 “시험 임박”을 고르세요.</small></p></div>`;
+    <h3 class="sec">복습 주기</h3>
+    <div class="chips" id="presets">${Object.entries(PRESETS).map(([k, p]) => `<button class="chip ${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? 'on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>`;
   $$('[data-tpl]').forEach((b) => (b.onclick = () => applyTemplate(TEMPLATES.find((t) => t.id === b.dataset.tpl))));
   $('#rmsample')?.addEventListener('click', removeSamples);
   $$('#presets .chip').forEach((c) => (c.onclick = () => { S.intervals = PRESETS[c.dataset.p].intervals; saveS(); toast('복습 주기를 바꿨어요'); exploreView(); }));

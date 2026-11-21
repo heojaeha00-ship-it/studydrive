@@ -10,6 +10,7 @@ export const PRESETS = {
 export const TEMPLATES = [
   {
     id: 'toeic',
+    short: '파트별 폴더 · 예시 문제 · 복습 일정 자동 세팅',
     emoji: '🎯',
     title: '토익 900 정복',
     who: '토익 800점대 → 900점 목표',
@@ -106,6 +107,7 @@ export const TEMPLATES = [
   },
   {
     id: 'college',
+    short: '과목 폴더 · 개념 오답 분류 · 시험 대비',
     emoji: '🎓',
     title: '대학 수업·시험 대비',
     who: '강의자료·필기·중간/기말 준비',
@@ -166,6 +168,7 @@ export const TEMPLATES = [
   },
   {
     id: 'cert',
+    short: '기출 폴더 · 촘촘한 복습(1·2·4·7일)',
     emoji: '📜',
     title: '자격증·공무원 기출',
     who: '시험일이 정해진 기출 반복형',
@@ -221,10 +224,10 @@ export const TEMPLATES = [
 ];
 
 export const SCENARIOS = [
-  { emoji: '📱', title: '태블릿에서 풀고 폰으로 복습', body: '집에선 태블릿 S펜으로 풀고, 이동 중엔 폰에서 [오늘 복습]만 눌러 끝내요. 같은 계정이면 필기와 오답이 그대로 따라와요.', cta: '내 파일 열기', href: '#/files' },
-  { emoji: '🖍️', title: 'PDF에 바로 필기', body: '파일을 열고 ✏️ 펜 / 🖍️ 형광펜을 고르면 바로 필기돼요. 저장 버튼 없이 자동 저장돼요.', cta: '예시 노트 열기', href: '#/files' },
-  { emoji: '💬', title: '모르는 쪽을 AI에게 질문', body: '뷰어의 [AI 질문]을 누르면 지금 보고 있는 쪽을 AI가 읽고 요약·설명·퀴즈를 만들어 줘요.', cta: '파일에서 해보기', href: '#/files' },
-  { emoji: '📒', title: '틀린 이유로 약점 찾기', body: '오답을 “어휘/문법/듣기 놓침…”으로 분류해 두면 그래프로 보이고, AI가 약점과 이번 주 계획을 알려 줘요.', cta: '오답노트 보기', href: '#/mistakes' },
-  { emoji: '🎯', title: '내 오답으로 AI 퀴즈', body: '틀린 문제와 같은 유형으로 AI가 새 문제 5개를 내 줘요. 시험 전날 마무리용으로 좋아요.', cta: '퀴즈 시작', href: '#/quiz' },
-  { emoji: '🔁', title: '잊을 때쯤 자동 복습', body: '다시/어려움/좋음/쉬움 중 고르면 다음 복습일이 알아서 정해져요. 매일 오늘 분량만 하면 돼요.', cta: '오늘 복습', href: '#/review' },
+  { emoji: '📱', title: '태블릿에서 풀고, 폰으로 복습', body: '같은 계정이면 필기·오답이 이어져요', href: '#/files' },
+  { emoji: '📝', title: '빈 노트에 바로 필기', body: '백지·줄·모눈·점·코넬 노트 생성', href: '#/files' },
+  { emoji: '💬', title: '모르는 쪽을 AI에게 질문', body: '보고 있는 쪽을 읽고 설명해 줘요', href: '#/files' },
+  { emoji: '📒', title: '틀린 이유로 약점 찾기', body: '원인별 통계와 AI 진단', href: '#/mistakes' },
+  { emoji: '🎯', title: '내 오답으로 AI 퀴즈', body: '같은 유형의 새 문제 5개', href: '#/quiz' },
+  { emoji: '🔁', title: '잊을 때쯤 자동 복습', body: '다시·어려움·좋음·쉬움만 고르면 끝', href: '#/review' },
 ];

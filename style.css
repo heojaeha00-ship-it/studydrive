@@ -138,3 +138,11 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .msg{padding:8px 12px;border-radius:12px;max-width:92%;white-space:pre-wrap;font-size:14px}.msg.u{background:var(--pri);color:#fff;align-self:flex-end}.msg.a{background:var(--pri-soft)}
 .aq{display:flex;gap:6px;flex-wrap:wrap;padding:6px 12px}.af{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
 @media (max-width:860px){.stats{grid-template-columns:repeat(2,1fr)}.askp{top:auto;height:62%;width:100%;border-radius:18px 18px 0 0}}
+
+/* 둘러보기 간결화 */
+.hero{padding:18px 20px}.hero h1{font-size:20px}.hero p{margin-bottom:2px}
+.tpls{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.tpl{align-items:flex-start}.tpl h3{font-size:16px}.tpl p{font-size:13px;flex:1}
+.scen{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.sc{flex-direction:row;align-items:center;gap:12px;padding:12px 14px}.sc .te{font-size:24px}.sc b{font-size:14px}.sc p{margin:0;font-size:12px}
+.sec{font-size:15px;margin:20px 0 8px}
