@@ -287,6 +287,11 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     box.scrollTop = box.scrollHeight;
   }
   $('.af', root)?.addEventListener('submit', (e) => { e.preventDefault(); const i = $('#askin', root); const v = i.value; i.value = ''; sendAsk(v); });
+  const onVis = async () => {
+    if (document.visibilityState !== 'visible' || destroyed) return;
+    try { const fresh = await store.ann.get(row.id); for (const k of Object.keys(fresh)) strokes[k] = fresh[k]; objs.forEach((o) => redraw(o)); } catch {}
+  };
+  document.addEventListener('visibilitychange', onVis);
   const onResize = () => { layout(); objs.forEach((o) => { o.rw = 0; io.unobserve(o.wrap); io.observe(o.wrap); }); };
   window.addEventListener('resize', onResize);
 
@@ -304,6 +309,6 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
   return {
     page: () => current,
     capture,
-    destroy() { destroyed = true; io?.disconnect(); window.removeEventListener('resize', onResize); objs.forEach((o) => o.task?.cancel()); doc?.destroy?.(); },
+    destroy() { destroyed = true; document.removeEventListener('visibilitychange', onVis); io?.disconnect(); window.removeEventListener('resize', onResize); objs.forEach((o) => o.task?.cancel()); doc?.destroy?.(); },
   };
 }

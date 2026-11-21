@@ -16,6 +16,7 @@ const mb = (b) => (b / 1048576 < 10 ? (b / 1048576).toFixed(1) : Math.round(b / 
 const usedBytes = () => files.reduce((a, f) => a + (f.size || 0), 0);
 const ICON = { pdf: '📕', image: '🖼️', text: '📝', other: '📄' };
 let files = [], mistakes = [], viewer = null;
+const classifying = new Set();
 const filter = { cat: '전체', q: '' };
 let S = { intervals: INTERVALS, reasons: REASONS, cats: [], activity: {}, flags: {}, tpl: null, seen: false };
 
@@ -82,10 +83,19 @@ function renderNav(user, active) {
     <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>${ico('book')}</i><span>오답노트</span></a>
     <a href="#/explore" class="${on('explore')}"><i>${ico('compass')}</i><span>둘러보기</span></a>
     <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' && !user.email ? '<button class="btn sm" id="upgrade">계정 만들기 (데이터 보존)</button>' : ''}${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
-  $('#upgrade')?.addEventListener('click', async () => {
-    const email = prompt('이메일'); if (!email) return;
-    const pw = prompt('비밀번호 (6자 이상)'); if (!pw) return;
-    try { await store.auth.upgrade(email, pw); toast('확인 메일을 보냈어요. 메일의 링크를 누르면 계정이 완성돼요.', 6000); } catch (e) { toast(e.message, 5000); }
+  $('#upgrade')?.addEventListener('click', () => {
+    const d = $('#dlg');
+    d.innerHTML = `<form class="dlg-body"><h3>계정 만들기</h3><p class="muted">지금까지의 파일·필기·오답을 그대로 유지한 채 내 계정으로 바꿔요.</p>
+      <label>이메일<input name="email" type="email" required autocomplete="email"></label>
+      <label>비밀번호 (6자 이상)<input name="pw" type="password" minlength="6" required autocomplete="new-password"></label>
+      <div class="row end"><button type="button" class="btn ghost" data-x>취소</button><button class="btn primary">계정 만들기</button></div></form>`;
+    d.showModal();
+    const f = $('form', d); f.email.focus();
+    $('[data-x]', d).onclick = () => d.close();
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      try { await store.auth.upgrade(f.email.value.trim(), f.pw.value); d.close(); toast('확인 메일을 보냈어요. 메일의 링크를 누르면 계정이 완성돼요.', 6000); } catch (er) { toast(er.message, 5000); }
+    };
   });
   $('#logout')?.addEventListener('click', async () => { if (!user.email && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; await store.auth.signOut(); route.loaded = false; route(); });
   store.mistakes.list().then((m) => { mistakes = m; badge(); }).catch(() => {});
@@ -201,7 +211,7 @@ function drawFiles() {
       <div class="fi">${ICON[kind(f.name, f.mime)]}</div>
       <div class="fb">
         <h3>${esc(f.name.replace(/\.(md|txt)$/i, ''))}</h3>
-        <div class="meta"><span class="badge" data-act="cat">${esc(f.category || '미분류')}</span>${(f.tags || []).map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
+        <div class="meta">${classifying.has(f.id) ? '<span class="badge busy">AI 분류 중…</span>' : `<span class="badge" data-act="cat">${esc(f.category || '미분류')}</span>`}${(f.tags || []).map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
         ${f.summary ? `<p class="sum">${esc(f.summary)}</p>` : ''}
         <div class="foot"><small>${fmtDate(f.created_at)} · ${f.size < 1048576 ? Math.max(1, Math.round(f.size / 1024)) + 'KB' : (f.size / 1048576).toFixed(1) + 'MB'}</small>
           <span><button class="lnk" data-act="reclass">자동 분류</button><button class="lnk" data-act="rename">이름 바꾸기</button><button class="lnk danger" data-act="del">삭제</button></span></div>
@@ -236,7 +246,7 @@ async function update(row, patch) {
 }
 
 async function classify(row) {
-  const t = toast(`🤖 AI가 "${row.name}"을(를) 분류하는 중…`, 0);
+  classifying.add(row.id); if ($('#grid')) drawFiles();
   try {
     const blob = await store.files.blob(row);
     const type = kind(row.name, row.mime);
@@ -250,10 +260,11 @@ async function classify(row) {
     const known = [...new Set([...(S.cats || []), ...files.map((f) => f.category)].filter((c) => c && c !== '미분류'))];
     const r = await ai('classify', { name: row.name, text, image, categories: known });
     const keep = (row.tags || []).filter((x) => RESERVED.has(x));
+    classifying.delete(row.id);
     await update(row, { category: r.category || '미분류', tags: [...keep, ...(r.tags || []).filter((x) => !RESERVED.has(x))].slice(0, 6), summary: r.summary || '' });
-    t.close(); toast(`분류 완료: ${r.category}`);
+    toast(`분류 완료: ${r.category}`);
   } catch (e) {
-    t.close();
+    classifying.delete(row.id);
     await update(row, { category: guessCategory(row.name) });
     toast('AI 연결이 어려워 파일 이름으로 분류했어요', 3500);
   }
@@ -381,7 +392,7 @@ async function explain(m, image) {
       const keep = $('#recall')?.value, shown = $('#ans') && !$('#ans').hidden, cf = conf;
       drawReview();
       if (keep && $('#recall')) $('#recall').value = keep;
-      if (shown && $('#ans')) { $('#ans').hidden = false; if ($('#reveal')) $('#reveal').hidden = true; }
+      if (shown && $('#ans')) { $('#ans').hidden = false; if ($('#reveal')) $('#reveal').hidden = true; unlockRates(); }
       if (cf) $$('.conf .chip').forEach((x) => x.classList.toggle('on', x.dataset.c === cf));
     }
   } catch (e) { t.close(); toast('AI 해설 실패: ' + e.message, 5000); }
@@ -416,7 +427,7 @@ async function reviewView() {
   view.innerHTML = '<p class="muted pad">불러오는 중…</p>';
   try { mistakes = await store.mistakes.list(); if (!files.length) files = await store.files.list(); } catch (e) { view.innerHTML = `<p class="pad muted">${esc(e.message)}</p>`; return; }
   badge();
-  queue = due(); qi = 0; done = {}; sessionLog = []; conf = null;
+  queue = due(); qi = 0; done = {}; sessionLog = []; conf = null; revealed = false;
   view.innerHTML = '<div id="rv" class="narrow"></div>';
   drawReview();
 }
@@ -445,14 +456,14 @@ function drawReview() {
         ${m.ai ? '' : '<button class="btn" id="mkai">🤖 AI 해설 받기</button>'}</div>
       <div id="ans" hidden>${m.ai ? aiHtml(m.ai) : P(m.memo || '저장된 해설이 없어요. 원본에서 확인해 보세요.')}</div>
     </article>
-    <p class="muted center">얼마나 잘 기억났나요?</p>
-    <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}"><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
+    <p class="muted center" id="ratehint">정답을 확인한 뒤, 얼마나 잘 기억났는지 골라 주세요</p>
+    <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}" ${revealed ? '' : 'disabled'}><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
   $('#mkai')?.addEventListener('click', () => explain(m));
   $$('.conf .chip', rv).forEach((b) => b.addEventListener('click', () => { conf = b.dataset.c; $$('.conf .chip', rv).forEach((x) => x.classList.toggle('on', x === b)); }));
   $('#reveal')?.addEventListener('click', async () => {
     const myQi = qi;
     const recall = $('#recall')?.value.trim();
-    $('#ans').hidden = false; $('#reveal').hidden = true;
+    $('#ans').hidden = false; $('#reveal').hidden = true; unlockRates();
     const expected = m.ai?.answer || m.memo;
     if (!recall || !expected) return;
     const fb = document.createElement('p'); fb.className = 'samplenote'; fb.textContent = '🤖 내 답을 채점하는 중…'; $('#ans').prepend(fb);
@@ -473,9 +484,11 @@ function insightHtml() {
   if (under) lines.push(`💡 모른다고 했지만 맞힌 문제 ${under}개 — 생각보다 알고 있어요.`);
   return lines.length ? `<div class="ai">${lines.map((l) => `<p>${l}</p>`).join('')}</div>` : '';
 }
-let rating = false, conf = null, sessionLog = [];
+let rating = false, conf = null, sessionLog = [], revealed = false;
+function unlockRates() { revealed = true; $$('.rate').forEach((b) => { b.disabled = false; }); $('#ratehint')?.remove(); }
 async function rate(r) {
   const m = queue[qi]; if (!m || rating) return;
+  if (!revealed) return toast('먼저 [정답 확인]을 눌러 주세요');
   rating = true;
   const p = plan(m, r);
   const entry = { d: today(), r, s: m.stage || 0, c: conf || null };
@@ -483,7 +496,7 @@ async function rate(r) {
   const patch = p.graduated ? { graduated: true, stage: p.stage, last_result: r, hist: hh } : { stage: p.stage, next_review: p.next_review, last_result: r, hist: hh };
   try { const n = await store.mistakes.update(m.id, patch); mistakes = mistakes.map((x) => (x.id === n.id ? n : x)); queue[qi] = n; } catch (e) { rating = false; return toast('저장 실패: ' + e.message); }
   sessionLog.push({ r, c: conf }); conf = null;
-  done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; drawReview();
+  done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; revealed = false; drawReview();
 }
 addEventListener('keydown', (e) => {
   if (!$('#rv') || e.target.closest('input,textarea,select')) return;

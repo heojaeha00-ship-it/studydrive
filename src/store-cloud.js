@@ -68,15 +68,21 @@ export function cloud(cfg) {
       async set(v) { const uid = (await session()).user.id; ok(await sb.from('profiles').upsert({ user_id: uid, data: v, updated_at: new Date().toISOString() })); },
     },
     async ai(action, payload) {
-      const call = sb.functions.invoke('ai', { body: { action, ...payload } });
-      const { data, error } = await Promise.race([call, new Promise((_, rej) => setTimeout(() => rej(new Error('AI 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.')), 45000))]);
-      if (error) {
-        let msg = error.message;
-        try { msg = (await error.context.json()).error || msg; } catch {}
-        throw new Error(msg);
+      const once = async () => {
+        const call = sb.functions.invoke('ai', { body: { action, ...payload } });
+        const { data, error } = await Promise.race([call, new Promise((_, rej) => setTimeout(() => rej(new Error('AI 응답이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.')), 45000))]);
+        if (error) {
+          let msg = error.message;
+          try { msg = (await error.context.json()).error || msg; } catch {}
+          throw new Error(msg);
+        }
+        if (data?.error) throw new Error(data.error);
+        return data;
+      };
+      try { return await once(); } catch (e) {
+        if (/503|늦어요|오래 걸려요|혼잡|가득/.test(e.message)) { await new Promise((r) => setTimeout(r, 1500)); return once(); } // 일시적 과부하는 1번 자동 재시도
+        throw e;
       }
-      if (data?.error) throw new Error(data.error);
-      return data;
     },
   };
 }

@@ -252,3 +252,7 @@ body.auth .shell{display:block}body.auth main{padding:0}
 .lp-foot{text-align:center;color:rgba(255,255,255,.4);font-size:12px;padding:8px 16px 28px}
 @media (max-width:860px){.lp-hero{grid-template-columns:1fr;min-height:auto}.lp-feats{grid-template-columns:1fr 1fr}.lp-nav{display:none}}
 @media (max-width:560px){.lp-feats{grid-template-columns:1fr}.lp-stats{gap:16px}}
+
+.badge.busy{background:linear-gradient(90deg,var(--pri-soft),color-mix(in srgb,var(--pri) 22%,var(--card)),var(--pri-soft));background-size:200% 100%;animation:shimmer 1.2s linear infinite;color:var(--pri)}
+@keyframes shimmer{to{background-position:-200% 0}}
+.rate:disabled{opacity:.45;cursor:not-allowed}
