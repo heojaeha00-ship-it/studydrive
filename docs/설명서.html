@@ -74,6 +74,10 @@ b{font-weight:800}
 .foot{position:absolute;left:0;right:0;bottom:0;background:#141c5c;color:#cfd6ff;padding:5px 14mm;font-size:7.8pt;display:flex;justify-content:space-between}
 .foot b{color:#ffe066}
 .note{font-size:7.6pt;color:#6a7399;margin-top:3px}
+
+.syncbox{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;background:linear-gradient(135deg,#141c5c,#3451c7 60%,#7c4dff);color:#fff;border-radius:16px;padding:9px 14px;box-shadow:0 8px 20px rgba(52,81,199,.3)}
+.sb-copy{font-size:8.8pt;line-height:1.45}.sb-copy b:first-child{font-size:10.6pt;color:#ffe066}
+.sb-metrics{display:grid;gap:4px}.sb-metrics div{background:rgba(255,255,255,.14);border-radius:9px;padding:3px 10px;font-size:7.8pt;line-height:1.25}.sb-metrics b{display:block;font-size:13pt;color:#ffe066;font-weight:900}.sb-metrics small{display:block;opacity:.8;font-size:6.8pt}
 </style></head><body>
 
 <!-- ================= 1쪽 ================= -->
@@ -89,7 +93,7 @@ b{font-weight:800}
     <div class="stat"><b>3</b><small>기기 이어쓰기<br>PC·태블릿·폰</small></div>
     <div class="stat"><b>7</b><small>AI 기능<br>분류·해설·질문 등</small></div>
     <div class="stat"><b>4</b><small>단계 복습 평가<br>1·3·7·14일</small></div>
-    <div class="stat"><b>5</b><small>노트 용지<br>백지·줄·모눈·점·코넬</small></div>
+    <div class="stat"><b>2초</b><small>필기 → 다른 기기<br>실시간 동기화</small></div>
     <div class="stat"><b>11</b><small>자동 점검 항목<br>tests/e2e.js</small></div>
   </div>
 
@@ -115,6 +119,14 @@ b{font-weight:800}
     </div>
   </div>
 
+  <div class="sec" style="margin-top:4mm">
+    <div class="syncbox">
+      <svg viewBox="0 0 420 200" width="190" height="90"><g fill="none" stroke="#7dd3fc" stroke-width="2" stroke-dasharray="5 6"><path d="M92 112 C140 112 160 104 210 100"/><path d="M330 40 C280 46 250 80 210 100"/><path d="M330 168 C280 160 250 126 210 100"/></g><circle cx="210" cy="100" r="34" fill="#4f6df0"/><path d="M194 107a10 10 0 0 1 1-20 14 14 0 0 1 27 4 9 9 0 0 1 0 16z" fill="#fff"/><rect x="22" y="80" width="72" height="48" rx="7" fill="#0f1b3d" stroke="#38bdf8" stroke-width="3"/><rect x="326" y="14" width="58" height="72" rx="8" fill="#0f1b3d" stroke="#34d399" stroke-width="3"/><rect x="342" y="132" width="32" height="58" rx="8" fill="#0f1b3d" stroke="#fbbf24" stroke-width="3"/><circle cx="150" cy="108" r="5" fill="#ffe066"/><circle cx="270" cy="68" r="5" fill="#ffe066"/><circle cx="268" cy="138" r="5" fill="#ffe066"/></svg>
+      <div class="sb-copy"><b>⭐ 핵심 — 기기 간 실시간 동기화</b><br>한 기기에서 <b>필기·오답·파일</b>을 바꾸면 다른 기기에 <b>새로고침 없이 바로</b> 나타난다. 연결된 기기(💻 📟 📱)는 화면 위에 실시간 표시되고, QR 한 번으로 폰을 연결한다.</div>
+      <div class="sb-metrics"><div><b>2.3초</b>PC 필기 → 폰 화면</div><div><b>0.6초</b>폰 오답 → PC 오답노트</div><div><b>6.3초</b>노트 생성 → 폰 목록<small>(PDF 제작·업로드 포함)</small></div></div>
+    </div>
+    <div class="note">※ 실제 배포 사이트에서 같은 계정으로 PC·폰 화면 두 개를 동시에 접속해 측정(tests/sync.js, 서버: Supabase Realtime). 네트워크에 따라 달라질 수 있음.</div>
+  </div>
   <div class="sec">
     <h2><u>2</u>해결 — 한 번 올리면 알아서 이어지는 학습 드라이브</h2>
     <div class="grid">
@@ -127,16 +139,7 @@ b{font-weight:800}
     </div>
   </div>
 
-  <div class="sec">
-    <h2><u>3</u>처음 쓰는 사람도 3분 — ‘둘러보기’ 탭의 원클릭 세팅</h2>
-    <div class="grid">
-      <div class="card tpl" style="--c:#3451c7"><div class="ic">🎯</div><h3>토익 900 정복</h3><p>파트별 폴더 · 예시 PDF 문제 · 복습 일정 · 토익 맞춤 오답 원인이 한 번에 만들어진다.</p><span class="btn">이 템플릿으로 시작</span></div>
-      <div class="card tpl" style="--c:#12b886"><div class="ic">🎓</div><h3>대학 수업·시험 대비</h3><p>과목 폴더 · 필기 연습 노트 · 개념 중심 오답 분류와 시험 대비 퀴즈.</p><span class="btn">이 템플릿으로 시작</span></div>
-      <div class="card tpl" style="--c:#f08c00"><div class="ic">📜</div><h3>자격증·공무원 기출</h3><p>기출·요약·암기 폴더 · 시험이 가까운 사람용 촘촘한 1·2·4·7일 복습.</p><span class="btn">이 템플릿으로 시작</span></div>
-    </div>
-    <div class="guide"><span>① 파일 올리기</span><span>② 필기해 보기</span><span>③ 오답 등록</span><span>④ 복습 1회</span></div>
-    
-  </div>
+  <div class="sec" style="margin-top:4mm"><div class="guide"><span>🧭 둘러보기: 템플릿 한 번 → 폴더·예시 PDF·복습 일정</span><span>① 업로드 ② 필기 ③ 오답 등록 ④ 복습</span></div></div>
 </div>
 
 <!-- ================= 2쪽 ================= -->

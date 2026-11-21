@@ -50,7 +50,7 @@ const ink = (p, sel = '.vpage .ov') => p.evaluate((s) => { const c = document.qu
   await B.screenshot({ path: '/tmp/sync-phone.png' }).catch(() => {});
 
   // 4) 폰에서 오답 등록 → PC 쪽 오답 개수 배지 갱신(새로고침 없이)
-  await A.goto(BASE + '/#/mistakes'); await A.waitForSelector('#mlist', { timeout: 20000 });
+  await A.goto(BASE + '/#/mistakes'); await A.waitForSelector('#mlist', { state: 'attached', timeout: 20000 });
   const n0 = await A.locator('#mlist .m').count();
   await B.click('[data-a=mistake]'); await B.fill('input[name=label]', '동기화 시험 오답'); await B.uncheck('input[name=ai]'); await B.click('dialog .btn.primary');
   const t2 = Date.now();
@@ -58,7 +58,7 @@ const ink = (p, sel = '.vpage .ov') => p.evaluate((s) => { const c = document.qu
   ok((await A.locator('#mlist .m').count()) === n0 + 1, `폰에서 등록한 오답이 PC 오답노트에 새로고침 없이 나타남 (${((Date.now() - t2) / 1000).toFixed(1)}초)`);
 
   // 정리: 시험 데이터 삭제
-  await A.goto(BASE + '/#/mistakes'); await A.waitForSelector('#mlist');
+  await A.goto(BASE + '/#/mistakes'); await A.waitForSelector('#mlist', { state: 'attached' });
   A.on('dialog', (d) => d.accept());
   const mm = A.locator('#mlist .m:has-text("동기화 시험 오답") [data-act=del]'); if (await mm.count()) await mm.first().click();
   await A.goto(BASE + '/#/files'); await A.waitForSelector('#grid');

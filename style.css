@@ -295,3 +295,4 @@ body.auth .shell{display:block}body.auth main{padding:0}
 .lp-sync p{color:rgba(255,255,255,.7);line-height:1.7}.lp-sync ul{margin:12px 0 0 18px;color:rgba(255,255,255,.85);line-height:1.9;font-size:14px}
 .lp-sync-art{width:100%;height:auto;max-height:260px}
 @media (max-width:860px){.syncdemo,.lp-sync{grid-template-columns:1fr}.sync{top:auto;bottom:74px;right:10px}body.viewer-mode .sync{bottom:92px}.navsync{display:none}}
+dialog{margin:auto}
