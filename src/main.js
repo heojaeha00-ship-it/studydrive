@@ -10,6 +10,9 @@ const cfg = window.SD_CONFIG || {};
 const store = cfg.url && cfg.key ? cloud(cfg) : local();
 const view = $('#view');
 const nav = $('#nav');
+const QUOTA = 100 * 1048576; // 사용자당 저장 한도
+const mb = (b) => (b / 1048576 < 10 ? (b / 1048576).toFixed(1) : Math.round(b / 1048576)) + 'MB';
+const usedBytes = () => files.reduce((a, f) => a + (f.size || 0), 0);
 const ICON = { pdf: '📕', image: '🖼️', text: '📝', other: '📄' };
 let files = [], mistakes = [], viewer = null;
 const filter = { cat: '전체', q: '' };
@@ -124,7 +127,7 @@ function statsHtml() {
     <div class="stat"><b>🔥 ${streak()}</b><span>연속 학습일</span></div>
     <div class="stat"><b>🎓 ${grad}</b><span>졸업한 오답</span></div>
     <div class="stat week" title="최근 7일 학습량">${wk.map((v) => `<i style="height:${6 + (v / mx) * 30}px" class="${v ? 'on' : ''}"></i>`).join('')}<span>7일</span></div>
-  </section>`;
+  </section>${store.mode === 'cloud' ? `<div class="quota" title="사용자당 저장 한도"><div><i style="width:${Math.min(100, (usedBytes() / QUOTA) * 100)}%"></i></div><small>저장공간 ${mb(usedBytes())} / ${mb(QUOTA)}</small></div>` : ''}`;
 }
 
 function drawFiles() {
@@ -198,6 +201,7 @@ async function handleFiles(list) {
   for (const f of list) {
     if (kind(f.name, f.type) === 'other') { toast(`${f.name}: PDF·이미지·텍스트만 올릴 수 있어요`, 4000); continue; }
     if (f.size > 50 * 1048576) { toast(`${f.name}: 50MB를 넘어요`, 4000); continue; }
+    if (store.mode === 'cloud' && usedBytes() + f.size > QUOTA) { toast(`저장공간이 부족해요 (${mb(usedBytes())} / ${mb(QUOTA)}). 안 쓰는 파일을 삭제해 주세요.`, 5000); continue; }
     const t = toast(`⬆️ 업로드 중… ${f.name}`, 0);
     try {
       const row = await store.files.add(f);

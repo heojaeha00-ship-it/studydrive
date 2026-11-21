@@ -146,3 +146,5 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .scen{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
 .sc{flex-direction:row;align-items:center;gap:12px;padding:12px 14px}.sc .te{font-size:24px}.sc b{font-size:14px}.sc p{margin:0;font-size:12px}
 .sec{font-size:15px;margin:20px 0 8px}
+
+.quota{display:flex;align-items:center;gap:10px;margin:-2px 0 12px;color:var(--muted)}.quota div{flex:1;max-width:240px;height:6px;background:var(--line);border-radius:3px;overflow:hidden}.quota i{display:block;height:100%;background:var(--pri)}
