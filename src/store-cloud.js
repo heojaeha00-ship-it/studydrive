@@ -61,6 +61,13 @@ export function cloud(cfg) {
     async remove(ids) { if (ids.length) ok(await sb.from('strokes').delete().in('id', ids)); },
   };
 
+  const folders = {
+    list: async () => ok(await sb.from('folders').select('*').order('created_at', { ascending: true })),
+    add: async (f) => ok(await sb.from('folders').insert({ name: f.name, parent_id: f.parent_id || null, emoji: f.emoji || '📁', device: deviceInfo().label }).select().single()),
+    update: async (id, patch) => ok(await sb.from('folders').update(patch).eq('id', id).select().single()),
+    remove: async (id) => ok(await sb.from('folders').delete().eq('id', id)),
+  };
+
   const mistakes = {
     list: async () => ok(await sb.from('mistakes').select('*').order('created_at', { ascending: false })),
     add: async (m) => ok(await sb.from('mistakes').insert({ ...m, device: deviceInfo().label }).select().single()),
