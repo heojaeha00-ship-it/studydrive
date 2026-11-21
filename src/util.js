@@ -48,3 +48,12 @@ export function debounceKey(fn, ms = 600) {
 }
 
 export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now());
+
+const GUESS = [
+  [/part\s*[1-4]\b|\blc\b|듣기|listening/i, 'LC(듣기)'],
+  [/part\s*[5-7]\b|\brc\b|독해|reading/i, 'RC(독해)'],
+  [/voca|어휘|단어/i, '어휘'],
+  [/모의|실전|\btest\b/i, '모의고사'],
+  [/노트|note|필기/i, '노트'],
+];
+export const guessCategory = (text = '') => (GUESS.find(([re]) => re.test(text)) || [0, '미분류'])[1];

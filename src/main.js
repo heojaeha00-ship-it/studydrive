@@ -1,4 +1,4 @@
-import { $, $$, esc, toast, today, fmtDate, kind, REASONS, INTERVALS } from './util.js';
+import { $, $$, esc, toast, today, fmtDate, kind, REASONS, INTERVALS, guessCategory } from './util.js';
 import { local } from './store-local.js';
 import { cloud } from './store-cloud.js';
 import { openDoc, pageText, pageImage } from './pdf.js';
@@ -63,8 +63,8 @@ function renderNav(user, active) {
     <a href="#/review" class="${on('review')}"><i>🔁</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
     <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>📒</i><span>오답노트</span></a>
     <a href="#/explore" class="${on('explore')}"><i>🧭</i><span>둘러보기</span></a>
-    <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '')}</span>${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>로컬 모드</em>'}</div>`;
-  $('#logout')?.addEventListener('click', async () => { await store.auth.signOut(); route.loaded = false; route(); });
+    <div class="who"><span title="${esc(user.email || '')}">${esc(user.email || '게스트 체험')}</span>${store.mode === 'cloud' ? '<button class="btn ghost sm" id="logout">로그아웃</button>' : '<em>이 기기에만 저장 중</em>'}</div>`;
+  $('#logout')?.addEventListener('click', async () => { if (!user.email && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; await store.auth.signOut(); route.loaded = false; route(); });
   store.mistakes.list().then((m) => { mistakes = m; badge(); }).catch(() => {});
 }
 function badge() { const b = $('#due-badge'); if (b) { const n = due().length; b.hidden = !n; b.textContent = n; } }
@@ -76,13 +76,13 @@ function authView() {
     <div class="auth-card">
       <div class="logo">📚</div>
       <h1>스터디드라이브</h1>
-      <p class="muted">태블릿·폰·PC 어디서든 이어서 공부하는<br>AI 학습 드라이브</p>
+      <p class="muted">태블릿·폰·PC에서 이어서 공부하는<br>AI 학습 드라이브</p>
+      ${store.mode === 'cloud' ? '<button class="btn primary" id="demo">가입 없이 체험하기</button><div class="or">또는</div>' : ''}
       <form id="af">
-        <input type="email" name="email" placeholder="이메일" required autocomplete="email">
-        <input type="password" name="pw" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password">
-        <div class="row"><button class="btn primary grow" data-m="in">로그인</button><button class="btn grow" type="button" data-m="up">회원가입</button></div>
+        <label class="vh2" for="em">이메일</label><input id="em" type="email" name="email" placeholder="이메일" required autocomplete="email">
+        <label class="vh2" for="pw">비밀번호</label><input id="pw" type="password" name="pw" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password">
+        <div class="row"><button class="btn grow" data-m="in">로그인</button><button class="btn grow" type="button" data-m="up">회원가입</button></div>
       </form>
-      ${cfg.demoEmail ? '<button class="btn ghost" id="demo">🎯 데모 계정으로 바로 체험</button>' : ''}
     </div>`;
   const go = async (m, email, pw) => {
     try { await (m === 'up' ? store.auth.signUp(email, pw) : store.auth.signIn(email, pw)); route.loaded = false; route(); } catch (e) { toast(e.message, 5000); }
@@ -90,7 +90,10 @@ function authView() {
   const f = $('#af');
   f.addEventListener('submit', (e) => { e.preventDefault(); go('in', f.email.value, f.pw.value); });
   $('[data-m=up]', f).addEventListener('click', () => f.reportValidity() && go('up', f.email.value, f.pw.value));
-  $('#demo')?.addEventListener('click', () => go('in', cfg.demoEmail, cfg.demoPassword));
+  $('#demo')?.addEventListener('click', async () => {
+    try { await store.auth.signInAnon(); route.loaded = false; route(); } // 방문자마다 개인 공간
+    catch { if (cfg.demoEmail) go('in', cfg.demoEmail, cfg.demoPassword); else toast('체험 시작에 실패했어요. 잠시 후 다시 시도해 주세요.'); }
+  });
 }
 
 // ───────── 내 파일 ─────────
@@ -125,7 +128,7 @@ function statsHtml() {
   return `<section class="stats">
     <a class="stat hot" href="#/review"><b>${n}</b><span>오늘 복습</span></a>
     <div class="stat"><b>🔥 ${streak()}</b><span>연속 학습일</span></div>
-    <div class="stat"><b>🎓 ${grad}</b><span>졸업한 오답</span></div>
+    <div class="stat"><b>🎓 ${grad}</b><span>마스터한 오답</span></div>
     <div class="stat week" title="최근 7일 학습량">${wk.map((v) => `<i style="height:${6 + (v / mx) * 30}px" class="${v ? 'on' : ''}"></i>`).join('')}<span>7일</span></div>
   </section>${store.mode === 'cloud' ? `<div class="quota" title="사용자당 저장 한도"><div><i style="width:${Math.min(100, (usedBytes() / QUOTA) * 100)}%"></i></div><small>저장공간 ${mb(usedBytes())} / ${mb(QUOTA)}</small></div>` : ''}`;
 }
@@ -135,7 +138,7 @@ function drawFiles() {
   if (filter.cat !== '전체' && !cats.includes(filter.cat)) filter.cat = '전체';
   $('#stats').innerHTML = statsHtml();
   const st = steps(), dn = st.filter(Boolean).length;
-  $('#banner').innerHTML = dn < 4 ? `<a class="banner" href="#/explore">🚀 시작 가이드 ${dn}/4 — 다음은 <b>${STEP_LABEL[st.indexOf(false)]}</b> → 둘러보기에서 원클릭으로 시작해 보세요</a>` : '';
+  $('#banner').innerHTML = dn < 4 ? `<a class="banner" href="#/explore">🚀 시작 가이드 ${dn}/4 · 다음: <b>${STEP_LABEL[st.indexOf(false)]}</b> (둘러보기에서 시작)</a>` : '';
   $('#chips').innerHTML = ['전체', ...cats].map((c) => `<button class="chip${filter.cat === c ? ' on' : ''}" data-c="${esc(c)}">${esc(c)} <small>${c === '전체' ? files.length : files.filter((f) => (f.category || '미분류') === c).length}</small></button>`).join('');
   const q = filter.q.trim().toLowerCase();
   const list = files.filter((f) => (filter.cat === '전체' || (f.category || '미분류') === filter.cat) && (!q || `${f.name} ${f.category} ${(f.tags || []).join(' ')} ${f.summary || ''}`.toLowerCase().includes(q)));
@@ -143,11 +146,11 @@ function drawFiles() {
     <article class="card file" data-id="${f.id}">
       <div class="fi">${ICON[kind(f.name, f.mime)]}</div>
       <div class="fb">
-        <h3>${esc(f.name)}</h3>
+        <h3>${esc(f.name.replace(/\.(md|txt)$/i, ''))}</h3>
         <div class="meta"><span class="badge" data-act="cat">${esc(f.category || '미분류')}</span>${(f.tags || []).map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
         ${f.summary ? `<p class="sum">${esc(f.summary)}</p>` : ''}
         <div class="foot"><small>${fmtDate(f.created_at)} · ${f.size < 1048576 ? Math.max(1, Math.round(f.size / 1024)) + 'KB' : (f.size / 1048576).toFixed(1) + 'MB'}</small>
-          <span><button class="lnk" data-act="reclass">AI 분류</button><button class="lnk" data-act="rename">이름</button><button class="lnk danger" data-act="del">삭제</button></span></div>
+          <span><button class="lnk" data-act="reclass">자동 분류</button><button class="lnk" data-act="rename">이름 바꾸기</button><button class="lnk danger" data-act="del">삭제</button></span></div>
       </div>
     </article>`).join('') : `<div class="empty"><div>📂</div><p>${files.length ? '검색 결과가 없어요' : '아직 파일이 없어요.<br>PDF나 노트를 올리면 AI가 알아서 분류해 줘요.'}</p>${files.length ? '' : '<a class="btn primary" href="#/explore">🧭 원클릭으로 시작하기</a>'}</div>`;
 }
@@ -168,7 +171,7 @@ view.addEventListener('click', async (e) => {
     const v = prompt('파일 이름', row.name);
     if (v?.trim()) update(row, { name: v.trim() });
   } else if (act === 'del') {
-    if (confirm(`"${row.name}"을(를) 삭제할까요? 필기도 함께 삭제돼요.`)) {
+    if (confirm(`'${row.name}'을(를) 삭제할까요? 필기도 함께 지워지고, 되돌릴 수 없어요.`)) {
       try { await store.files.remove(row); files = files.filter((f) => f.id !== row.id); drawFiles(); } catch (er) { toast('삭제 실패: ' + er.message); }
     }
   } else if (act === 'reclass') classify(row, true);
@@ -194,7 +197,11 @@ async function classify(row) {
     const r = await ai('classify', { name: row.name, text, image, categories: known });
     await update(row, { category: r.category || '미분류', tags: (r.tags || []).slice(0, 4), summary: r.summary || '' });
     t.close(); toast(`분류 완료: ${r.category}`);
-  } catch (e) { t.close(); toast('AI 분류 실패: ' + e.message, 4500); }
+  } catch (e) {
+    t.close();
+    await update(row, { category: guessCategory(row.name) });
+    toast('AI 연결이 어려워 파일 이름으로 분류했어요', 3500);
+  }
 }
 
 async function handleFiles(list) {
@@ -324,7 +331,8 @@ function aiHtml(a) {
 
 // ───────── 오늘 복습 (4단계 평가) ─────────
 let queue = [], qi = 0, done = {};
-const RATINGS = [['again', '다시', 'r-again'], ['hard', '어려움', 'r-hard'], ['good', '좋음', 'r-good'], ['easy', '쉬움', 'r-easy']];
+const RATINGS = [['again', '다시 볼래요', 'r-again'], ['hard', '어려웠어요', 'r-hard'], ['good', '괜찮았어요', 'r-good'], ['easy', '쉬웠어요', 'r-easy']];
+const inDays = (d) => (d === 1 ? '내일' : `${d}일 뒤`);
 function plan(m, r) {
   const I = S.intervals, s = m.stage || 0;
   if (r === 'again') return { stage: 0, days: I[0], next_review: today(I[0]) };
@@ -359,13 +367,16 @@ function drawReview() {
       <h2>${esc(m.label)}</h2>
       <p class="muted">${esc(m.file_name || '')} ${m.page ? `· ${m.page}쪽` : ''} · <span class="badge">${esc(m.reason)}</span></p>
       ${m.memo ? P('📝 ' + m.memo) : ''}
-      <p>👉 원본에서 <b>답을 가리고 다시 풀어 본 뒤</b> 얼마나 기억나는지 골라 주세요.</p>
+      <textarea id="recall" rows="2" placeholder="답이나 핵심을 먼저 떠올려 적어 보세요 (선택)"></textarea>
+      <button class="btn" id="reveal">정답 확인</button>
       <div class="row">${m.file_id ? `<a class="btn" href="#/f/${m.file_id}?p=${m.page || 1}">원본 열기</a>` : ''}
         ${m.ai ? '' : '<button class="btn" id="mkai">🤖 AI 해설 받기</button>'}</div>
-      ${m.ai ? `<details><summary>AI 해설·유사 문제 보기</summary>${aiHtml(m.ai)}</details>` : ''}
+      <div id="ans" hidden>${m.ai ? aiHtml(m.ai) : P(m.memo || '저장된 해설이 없어요. 원본에서 확인해 보세요.')}</div>
     </article>
-    <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}"><b>${label}</b><small>${p.graduated ? '졸업 🎓' : p.days + '일 후'}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
+    <p class="muted center">얼마나 잘 기억났나요?</p>
+    <div class="rates">${RATINGS.map(([k, label, cls], i) => { const p = plan(m, k); return `<button class="rate ${cls}" data-r="${k}"><b>${label}</b><small>${p.graduated ? '마스터 🎓' : inDays(p.days)}</small><kbd>${i + 1}</kbd></button>`; }).join('')}</div>`;
   $('#mkai')?.addEventListener('click', () => explain(m));
+  $('#reveal')?.addEventListener('click', () => { $('#ans').hidden = false; $('#reveal').hidden = true; });
   $$('[data-r]', rv).forEach((b) => b.addEventListener('click', () => rate(b.dataset.r)));
 }
 async function rate(r) {
@@ -396,12 +407,12 @@ function drawMistakes() {
   const by = R.map((r) => [r, mistakes.filter((m) => m.reason === r).length]).filter((x) => x[1]);
   const max = Math.max(1, ...by.map((x) => x[1]));
   const grad = mistakes.filter((m) => m.graduated).length;
-  $('#stats').innerHTML = mistakes.length ? `<h4>틀린 이유 분포 <small class="muted">총 ${mistakes.length}개 · 졸업 ${grad}개 · 오늘 복습 ${due().length}개</small></h4>${by.map(([r, n]) => `<div class="bar"><span>${esc(r)}</span><i style="width:${(n / max) * 100}%"></i><b>${n}</b></div>`).join('')}` : '<p class="muted">아직 오답이 없어요. 파일 뷰어에서 [오답 등록]을 눌러 시작하세요. <a href="#/explore">예시로 먼저 체험하기 →</a></p>';
+  $('#stats').innerHTML = mistakes.length ? `<h4>틀린 이유 분포 <small class="muted">오답 ${mistakes.length}개 · 오늘 복습 ${due().length}개 · 마스터 ${grad}개</small></h4>${by.map(([r, n]) => `<div class="bar"><span>${esc(r)}</span><i style="width:${(n / max) * 100}%"></i><b>${n}</b></div>`).join('')}` : '<p class="muted">아직 오답이 없어요. 파일 뷰어에서 [오답 등록]을 눌러 시작하세요. <a href="#/explore">예시로 먼저 체험하기 →</a></p>';
   $('#mchips').innerHTML = ['전체', ...R].map((r) => `<button class="chip${mf === r ? ' on' : ''}" data-r="${esc(r)}">${esc(r)}</button>`).join('');
   const list = mistakes.filter((m) => mf === '전체' || m.reason === mf);
   $('#mlist').innerHTML = list.map((m) => `
     <article class="card m" data-id="${m.id}">
-      <div class="mh"><b>${esc(m.label)}</b><span class="badge">${esc(m.reason)}</span>${m.graduated ? '<span class="badge ok">졸업</span>' : `<small class="muted">다음 복습 ${m.next_review}</small>`}</div>
+      <div class="mh"><b>${esc(m.label)}</b><span class="badge">${esc(m.reason)}</span>${m.graduated ? '<span class="badge ok">마스터</span>' : `<small class="muted">다음 복습 ${m.next_review}</small>`}</div>
       <small class="muted">${esc(m.file_name || '')} ${m.page ? `· ${m.page}쪽` : ''}</small>
       ${m.memo ? P(m.memo) : ''}
       <div class="row">${m.file_id ? `<a class="lnk" href="#/f/${m.file_id}?p=${m.page || 1}">원본 열기</a>` : ''}${m.ai ? '' : '<button class="lnk" data-act="ai">AI 해설</button>'}<button class="lnk danger" data-act="del">삭제</button></div>
@@ -431,23 +442,45 @@ async function quizView() {
   if (!mistakes.length) return void ($('#qz').innerHTML = '<div class="empty"><div>📒</div><p>오답이 있어야 퀴즈를 만들 수 있어요.</p><a class="btn primary" href="#/explore">예시로 체험하기</a></div>');
   const items = mistakes.slice(0, 12).map((m) => ({ label: m.label, reason: m.reason, memo: m.memo, 핵심: (m.ai?.answer || '').slice(0, 200), 유형문제: (m.ai?.similar?.[0]?.question || '').slice(0, 160) }));
   let qs;
-  try { qs = (await ai('quiz', { items })).questions || []; } catch (e) { return void ($('#qz').innerHTML = `<div class="empty"><div>⚠️</div><p>${esc(e.message)}</p><a class="btn" href="#/mistakes">돌아가기</a></div>`); }
+  try { qs = (await ai('quiz', { items })).questions || []; } catch (e) {
+    qs = fallbackQuiz();
+    if (!qs.length) return void ($('#qz').innerHTML = `<div class="empty"><div>⚠️</div><p>${esc(e.message)}</p><a class="btn" href="#/mistakes">돌아가기</a></div>`);
+    toast('AI 연결이 어려워 내 오답의 유사 문제로 퀴즈를 만들었어요', 4000);
+  }
   let i = 0, score = 0;
   const draw = () => {
     const box = $('#qz'); if (!box) return;
-    if (i >= qs.length) { bump(); flag('quiz'); box.innerHTML = `<div class="empty"><div>${score >= qs.length * 0.8 ? '🏆' : '💪'}</div><h2>${score} / ${qs.length} 정답</h2><p class="muted">틀린 문제는 오답노트에 등록해 복습하세요.</p><div class="row" style="justify-content:center"><button class="btn" id="again">새 문제로 다시</button><a class="btn primary" href="#/mistakes">오답노트로</a></div></div>`; $('#again').onclick = quizView; return; }
+    if (i >= qs.length) { bump(); flag('quiz'); box.innerHTML = `<div class="empty"><div>${score >= qs.length * 0.8 ? '🏆' : '💪'}</div><h2>${score} / ${qs.length} 정답</h2><p class="muted">틀린 문제는 자동으로 오답노트에 담겼어요. 복습 일정에 들어가요.</p><div class="row" style="justify-content:center"><button class="btn" id="again">새 문제로 다시</button><a class="btn primary" href="#/mistakes">오답노트로</a></div></div>`; $('#again').onclick = quizView; return; }
     const q = qs[i], L = ['A', 'B', 'C', 'D'];
     box.innerHTML = `<div class="prog"><div style="width:${(i / qs.length) * 100}%"></div></div><p class="muted">${i + 1} / ${qs.length}${q.target ? ` · 겨냥: ${esc(q.target)}` : ''}</p>
       <article class="card big"><h3 class="pre">${esc(q.question)}</h3><div class="choices">${(q.choices || []).map((c, k) => `<button class="choice" data-k="${L[k]}">${L[k]}. ${esc(c)}</button>`).join('')}</div><div id="fb"></div></article>`;
     $$('.choice', box).forEach((b) => (b.onclick = () => {
       const ok = b.dataset.k === q.answer; if (ok) score++;
       $$('.choice', box).forEach((x) => { x.disabled = true; if (x.dataset.k === q.answer) x.classList.add('right'); });
-      if (!ok) b.classList.add('wrong');
+      if (!ok) { b.classList.add('wrong'); registerQuizMiss(q); }
       $('#fb').innerHTML = `<div class="ai"><h4>${ok ? '정답! 🎉' : `정답은 ${esc(q.answer)}`}</h4>${P(q.explanation)}</div><button class="btn primary" id="nx" style="margin-top:10px">${i + 1 < qs.length ? '다음 문제' : '결과 보기'}</button>`;
       $('#nx').onclick = () => { i++; draw(); };
     }));
   };
   draw();
+}
+
+function fallbackQuiz() {
+  const out = [];
+  for (const m of mistakes) for (const x of m.ai?.similar || []) {
+    const letter = String(x.answer || '').match(/[A-D]/)?.[0];
+    if (!letter || !Array.isArray(x.choices) || x.choices.length < 2) continue;
+    out.push({ question: x.question, choices: x.choices.map((c) => String(c).replace(/^\(?[A-D]\)?[.\s]*/, '')), answer: letter, explanation: x.explanation || '', target: m.label });
+  }
+  return out.slice(0, 5);
+}
+async function registerQuizMiss(q) {
+  try {
+    const label = '[퀴즈] ' + String(q.target || q.question).slice(0, 40);
+    if (mistakes.some((m) => m.label === label)) return;
+    const m = await store.mistakes.add({ file_id: null, file_name: 'AI 퀴즈', page: 1, label, reason: S.reasons[S.reasons.length - 1] || '기타', memo: String(q.question).slice(0, 200), stage: 0, next_review: today(S.intervals[0]), graduated: false, ai: { answer: `${q.answer}. ${q.explanation}` } });
+    mistakes.unshift(m); badge(); toast('틀린 문제를 오답노트에 담았어요 📒');
+  } catch {}
 }
 
 // ───────── 둘러보기 (처음 쓰는 사람용) ─────────
@@ -469,7 +502,7 @@ async function exploreView() {
         <div class="te">${t.emoji}</div>
         <h3>${esc(t.title)}</h3>
         <p class="muted">${esc(t.short)}</p>
-        <button class="btn ${S.tpl === t.id ? '' : 'primary'}" data-tpl="${t.id}">${S.tpl === t.id ? '적용됨 ✓' : '시작하기'}</button>
+        <button class="btn ${S.tpl === t.id ? '' : 'primary'}" data-tpl="${t.id}">${S.tpl === t.id ? '적용됨 ✓' : '이 템플릿으로 시작'}</button>
       </article>`).join('')}
     </div>
     ${hasSample ? '<div class="row" style="margin-top:10px"><button class="btn ghost sm" id="rmsample">🧹 예시 데이터 지우기</button></div>' : ''}
@@ -506,7 +539,7 @@ async function applyTemplate(t) {
       mistakes.unshift(mk);
     }
     await saveS(); tk.close();
-    toast(`✅ 세팅 완료! 오늘 복습 ${due().length}개가 준비됐어요`, 4000);
+    toast(`✅ 예시 학습 공간을 만들었어요. 오늘 복습할 카드 ${due().length}장이 있어요`, 4500);
     location.hash = '#/review';
   } catch (e) { tk.close(); toast('세팅 실패: ' + e.message, 5000); }
 }

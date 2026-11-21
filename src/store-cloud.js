@@ -58,6 +58,7 @@ export function cloud(cfg) {
         const d = ok(await sb.auth.signUp({ email, password }));
         if (!d.session) throw new Error('가입 확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.');
       },
+      async signInAnon() { ok(await sb.auth.signInAnonymously()); },
       signOut: () => sb.auth.signOut(),
     },
     files, ann, mistakes,

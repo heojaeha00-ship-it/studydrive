@@ -12,11 +12,11 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       <div class="vtitle" title="${esc(row.name)}">${esc(row.name)}</div>
       ${isPaged ? `
       <div class="tools">
-        <button class="tool on" data-tool="scroll" title="스크롤">✋</button>
-        <button class="tool" data-tool="pen" title="펜">✏️</button>
-        <button class="tool" data-tool="hl" title="형광펜">🖍️</button>
-        <button class="tool" data-tool="eraser" title="지우개">🧽</button>
-        <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}</span>
+        <button class="tool on" data-tool="scroll" title="스크롤" aria-label="스크롤">✋</button>
+        <button class="tool" data-tool="pen" title="펜" aria-label="펜">✏️</button>
+        <button class="tool" data-tool="hl" title="형광펜" aria-label="형광펜">🖍️</button>
+        <button class="tool" data-tool="eraser" title="지우개" aria-label="지우개">🧽</button>
+        <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}" aria-label="색 ${i + 1}"></button>`).join('')}</span>
         <button class="tool" data-a="undo" title="되돌리기">↩️</button>
         <button class="tool" data-a="zoomout" title="축소">－</button>
         <button class="tool" data-a="zoomin" title="확대">＋</button>
@@ -29,8 +29,8 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     <div class="vscroll"><div class="vpages"></div></div>
     <aside class="askp" hidden>
       <div class="ah"><b>💬 AI에게 질문</b><small class="muted" id="askpg"></small><button class="lnk" data-a="askclose">닫기</button></div>
-      <div class="am" id="askmsgs"><p class="muted">지금 보고 있는 쪽을 AI가 읽고 답해요.</p></div>
-      <div class="aq">${['이 쪽 핵심 요약', '핵심 어휘·용어 뽑아줘', '이 쪽으로 퀴즈 3개 내줘'].map((q) => `<button class="chip" data-q="${q}">${q}</button>`).join('')}</div>
+      <div class="am" id="askmsgs"><p class="muted">지금 보는 쪽을 바탕으로 답해요.</p></div>
+      <div class="aq">${['이 쪽 요약', '핵심 어휘 정리', '퀴즈 3문제 만들기'].map((q) => `<button class="chip" data-q="${q}">${q}</button>`).join('')}</div>
       <form class="af"><input id="askin" placeholder="궁금한 걸 물어보세요" autocomplete="off"><button class="btn primary sm">보내기</button></form>
     </aside>`;
 
@@ -250,8 +250,8 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       const n = undo.pop();
       if (n && strokes[n]?.length) { strokes[n].pop(); redraw(objs[n - 1]); flash('저장 중…'); save(n, n); }
     }
-    if (a === 'ask') { const p = $('.askp', root); p.hidden = !p.hidden; $('#askpg', root).textContent = `${current}쪽 기준`; if (!p.hidden) $('#askin', root).focus(); }
-    if (a === 'askclose') $('.askp', root).hidden = true;
+    if (a === 'ask') { const p = $('.askp', root); p.hidden = !p.hidden; root.classList.toggle('asking', !p.hidden); $('#askpg', root).textContent = `${current}쪽 기준`; if (!p.hidden) $('#askin', root).focus(); }
+    if (a === 'askclose') { $('.askp', root).hidden = true; root.classList.remove('asking'); }
     const q = e.target.closest('[data-q]')?.dataset.q; if (q) sendAsk(q);
     if (a === 'mistake') onMistake({ page: current, capture: () => capture(current) });
   });

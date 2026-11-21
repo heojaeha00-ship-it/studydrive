@@ -67,7 +67,7 @@ export function local() {
   };
   return {
     mode: 'local',
-    auth: { user: async () => ({ id: 'local', email: '이 기기 (로컬 모드)' }), signIn: async () => {}, signUp: async () => {}, signOut: async () => {} },
+    auth: { user: async () => ({ id: 'local', email: '이 기기 (로컬 모드)' }), signIn: async () => {}, signUp: async () => {}, signInAnon: async () => {}, signOut: async () => {} },
     files, ann, mistakes,
     settings: {
       get: async () => { try { return JSON.parse(localStorage.getItem('sd-settings') || '{}'); } catch { return {}; } },

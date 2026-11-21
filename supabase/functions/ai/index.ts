@@ -45,7 +45,7 @@ async function gemini(key: string, system: string, blocks: Block[], maxTokens: n
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: Math.max(maxTokens, 2048) },
+      generationConfig: { responseMimeType: "application/json", maxOutputTokens: Math.max(maxTokens, 8192) },
     }),
   });
   if (r.status === 429) throw new Error("AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요.");
