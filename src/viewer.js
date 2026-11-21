@@ -3,7 +3,7 @@ import { openDoc, toJpegB64 } from './pdf.js';
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#111827', '#f59e0b'];
 
-export async function mountViewer(root, { store, row, page = 1, onMistake, onBack }) {
+export async function mountViewer(root, { store, row, page = 1, onMistake, onBack, onEvent }) {
   const type = kind(row.name, row.mime);
   const isPaged = type === 'pdf' || type === 'image';
   root.innerHTML = `
@@ -21,11 +21,18 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
         <button class="tool" data-a="zoomout" title="축소">－</button>
         <button class="tool" data-a="zoomin" title="확대">＋</button>
         <span class="pg" id="pg">1 / 1</span>
+        <button class="btn sm" data-a="ask">💬 AI 질문</button>
         <button class="btn primary sm" data-a="mistake">오답 등록</button>
         <span class="saved" id="saved"></span>
       </div>` : type === 'text' ? `<div class="tools"><button class="btn primary sm" data-a="savetext">저장</button><span class="saved" id="saved"></span></div>` : ''}
     </div>
-    <div class="vscroll"><div class="vpages"></div></div>`;
+    <div class="vscroll"><div class="vpages"></div></div>
+    <aside class="askp" hidden>
+      <div class="ah"><b>💬 AI에게 질문</b><small class="muted" id="askpg"></small><button class="lnk" data-a="askclose">닫기</button></div>
+      <div class="am" id="askmsgs"><p class="muted">지금 보고 있는 쪽을 AI가 읽고 답해요.</p></div>
+      <div class="aq">${['이 쪽 핵심 요약', '핵심 어휘·용어 뽑아줘', '이 쪽으로 퀴즈 3개 내줘'].map((q) => `<button class="chip" data-q="${q}">${q}</button>`).join('')}</div>
+      <form class="af"><input id="askin" placeholder="궁금한 걸 물어보세요" autocomplete="off"><button class="btn primary sm">보내기</button></form>
+    </aside>`;
 
   const scroller = $('.vscroll', root);
   const pagesEl = $('.vpages', root);
@@ -176,6 +183,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       redraw(o);
       flash('저장 중…');
       save(o.n, o.n);
+      onEvent?.('draw');
     };
     o.ov.addEventListener('pointerup', end);
     o.ov.addEventListener('pointercancel', end);
@@ -222,8 +230,29 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       const n = undo.pop();
       if (n && strokes[n]?.length) { strokes[n].pop(); redraw(objs[n - 1]); flash('저장 중…'); save(n, n); }
     }
+    if (a === 'ask') { const p = $('.askp', root); p.hidden = !p.hidden; $('#askpg', root).textContent = `${current}쪽 기준`; if (!p.hidden) $('#askin', root).focus(); }
+    if (a === 'askclose') $('.askp', root).hidden = true;
+    const q = e.target.closest('[data-q]')?.dataset.q; if (q) sendAsk(q);
     if (a === 'mistake') onMistake({ page: current, capture: () => capture(current) });
   });
+  const hist = [];
+  async function sendAsk(q) {
+    q = (q || '').trim(); if (!q) return;
+    const box = $('#askmsgs', root);
+    const add = (cls, t) => { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = t; box.append(d); box.scrollTop = box.scrollHeight; return d; };
+    if (box.firstElementChild?.tagName === 'P') box.innerHTML = '';
+    add('u', q); const w = add('a', '생각 중…');
+    $('#askpg', root).textContent = `${current}쪽 기준`;
+    try {
+      const image = await capture(current);
+      const r = await store.ai('ask', { question: q, image, history: hist });
+      w.textContent = r.answer || '(답변이 비어 있어요)';
+      hist.push({ role: 'user', content: q }, { role: 'assistant', content: r.answer || '' });
+      onEvent?.('ask');
+    } catch (er) { w.textContent = '⚠️ ' + er.message; }
+    box.scrollTop = box.scrollHeight;
+  }
+  $('.af', root)?.addEventListener('submit', (e) => { e.preventDefault(); const i = $('#askin', root); const v = i.value; i.value = ''; sendAsk(v); });
   const onResize = () => { layout(); objs.forEach((o) => { o.rw = 0; io.unobserve(o.wrap); io.observe(o.wrap); }); };
   window.addEventListener('resize', onResize);
 

@@ -69,6 +69,10 @@ export function local() {
     mode: 'local',
     auth: { user: async () => ({ id: 'local', email: '이 기기 (로컬 모드)' }), signIn: async () => {}, signUp: async () => {}, signOut: async () => {} },
     files, ann, mistakes,
+    settings: {
+      get: async () => { try { return JSON.parse(localStorage.getItem('sd-settings') || '{}'); } catch { return {}; } },
+      set: async (v) => localStorage.setItem('sd-settings', JSON.stringify(v)),
+    },
     async ai(action, p) {
       if (action === 'classify') {
         const hay = `${p.name} ${p.text || ''}`;

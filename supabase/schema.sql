@@ -40,6 +40,14 @@ create table if not exists public.mistakes (
   created_at timestamptz default now()
 );
 
+create table if not exists public.profiles (
+  user_id uuid primary key default auth.uid() references auth.users on delete cascade,
+  data jsonb not null default '{}',
+  updated_at timestamptz default now()
+);
+alter table public.profiles enable row level security;
+create policy "own profile" on public.profiles for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
 alter table public.files enable row level security;
 alter table public.annotations enable row level security;
 alter table public.mistakes enable row level security;

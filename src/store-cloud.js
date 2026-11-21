@@ -61,6 +61,10 @@ export function cloud(cfg) {
       signOut: () => sb.auth.signOut(),
     },
     files, ann, mistakes,
+    settings: {
+      async get() { const d = ok(await sb.from('profiles').select('data').maybeSingle()); return d?.data || {}; },
+      async set(v) { const uid = (await session()).user.id; ok(await sb.from('profiles').upsert({ user_id: uid, data: v, updated_at: new Date().toISOString() })); },
+    },
     async ai(action, payload) {
       const { data, error } = await sb.functions.invoke('ai', { body: { action, ...payload } });
       if (error) {
