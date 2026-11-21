@@ -257,12 +257,17 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     const q = e.target.closest('[data-q]')?.dataset.q; if (q) sendAsk(q);
     if (a === 'mistake') onMistake({ page: current, capture: () => capture(current) });
   });
+  let cardsBusy = false;
   async function showCards() {
+    if (cardsBusy) return;
+    cardsBusy = true;
+    const pg = current;
     const p = $('.askp', root); p.hidden = false; root.classList.add('asking');
     const box = $('#askmsgs', root); box.innerHTML = '<p class="muted">카드를 만드는 중…</p>';
-    const cards = await onCards?.(await capture(current)) || [];
+    let cards = [];
+    try { cards = await onCards?.(await capture(pg)) || []; } catch { cards = []; } finally { cardsBusy = false; }
     box.innerHTML = cards.length ? cards.map((c, i) => `<div class="msg a cardmsg"><b>${esc(c.front)}</b><br>${esc(c.back)}<br><button class="lnk" data-card="${i}">복습에 추가</button></div>`).join('') : '<p class="muted">카드를 만들지 못했어요.</p>';
-    $$('[data-card]', box).forEach((b) => (b.onclick = async () => { await onAddCard?.(cards[b.dataset.card], current); b.textContent = '추가됨 ✓'; b.disabled = true; }));
+    $$('[data-card]', box).forEach((b) => (b.onclick = async () => { b.disabled = true; try { await onAddCard?.(cards[b.dataset.card], pg); b.textContent = '추가됨 ✓'; } catch { b.disabled = false; toast('카드 추가 실패'); } }));
   }
   const hist = [];
   async function sendAsk(q) {

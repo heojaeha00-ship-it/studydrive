@@ -346,7 +346,13 @@ async function explain(m, image) {
     const qk = queue.findIndex((x) => x.id === n.id); if (qk >= 0) queue[qk] = n;
     t.close(); toast('✅ AI 해설이 준비됐어요');
     if ($('#mlist')) drawMistakes();
-    if ($('#rv')) { const keep = $('#recall')?.value; drawReview(); if (keep && $('#recall')) $('#recall').value = keep; }
+    if ($('#rv')) {
+      const keep = $('#recall')?.value, shown = $('#ans') && !$('#ans').hidden, cf = conf;
+      drawReview();
+      if (keep && $('#recall')) $('#recall').value = keep;
+      if (shown && $('#ans')) { $('#ans').hidden = false; if ($('#reveal')) $('#reveal').hidden = true; }
+      if (cf) $$('.conf .chip').forEach((x) => x.classList.toggle('on', x.dataset.c === cf));
+    }
   } catch (e) { t.close(); toast('AI 해설 실패: ' + e.message, 5000); }
 }
 
@@ -423,7 +429,7 @@ function drawReview() {
       const r = await ai('grade', { label: m.label, expected: String(expected).slice(0, 600), answer: recall.slice(0, 400) });
       fb.textContent = `🤖 ${r.feedback || ''}`;
       if (qi !== myQi) return;
-      const btn = $(`[data-r=${r.suggest}]`); if (btn) { btn.classList.add('suggest'); $('small', btn).textContent += ' · 추천'; }
+      const btn = RATINGS.some((x) => x[0] === r.suggest) ? $(`[data-r=${r.suggest}]`) : null; if (btn) { btn.classList.add('suggest'); $('small', btn).textContent += ' · 추천'; }
     } catch { fb.remove(); }
   });
   $$('[data-r]', rv).forEach((b) => b.addEventListener('click', () => rate(b.dataset.r)));
@@ -509,7 +515,7 @@ async function quizView() {
     if (!qs.length) return void ($('#qz').innerHTML = `<div class="empty"><div>⚠️</div><p>${esc(e.message)}</p><a class="btn" href="#/mistakes">돌아가기</a></div>`);
     toast('AI 연결이 어려워 내 오답의 유사 문제로 퀴즈를 만들었어요', 4000);
   }
-  qs = qs.filter((q) => Array.isArray(q.choices) && q.choices.length >= 2).map((q) => ({ ...q, answer: (String(q.answer || '').toUpperCase().match(/[A-D]/) || [''])[0] })).filter((q) => q.answer);
+  qs = qs.filter((q) => Array.isArray(q.choices) && q.choices.length >= 2).map((q) => ({ ...q, answer: letterOf(q.answer) })).filter((q) => q.answer);
   qs = qs.map(shuffleQ);
   if (!qs.length) return void ($('#qz').innerHTML = '<div class="empty"><div>⚠️</div><p>퀴즈를 만들지 못했어요. 잠시 후 다시 시도해 주세요.</p><a class="btn" href="#/mistakes">돌아가기</a></div>');
   let i = 0, score = 0;
@@ -530,6 +536,10 @@ async function quizView() {
   draw();
 }
 
+function letterOf(a) {
+  const t = String(a || '').trim().toUpperCase();
+  return (t.match(/^\(?([A-D])\)?$/) || t.match(/\b([A-D])\b/) || [0, ''])[1];
+}
 function shuffleQ(q) {
   const L = ['A', 'B', 'C', 'D'], right = q.choices[L.indexOf(q.answer)];
   const ch = [...q.choices];
@@ -539,9 +549,9 @@ function shuffleQ(q) {
 function fallbackQuiz() {
   const out = [];
   for (const m of mistakes) for (const x of m.ai?.similar || []) {
-    const letter = String(x.answer || '').match(/[A-D]/)?.[0];
+    const letter = letterOf(x.answer);
     if (!letter || !Array.isArray(x.choices) || x.choices.length < 2) continue;
-    out.push({ question: x.question, choices: x.choices.map((c) => String(c).replace(/^\(?[A-D]\)?[.\s]*/, '')), answer: letter, explanation: x.explanation || '', target: m.label });
+    out.push({ question: x.question, choices: x.choices.map((c) => String(c).replace(/^\([A-D]\)\s*|^[A-D][.)]\s+/, '')), answer: letter, explanation: x.explanation || '', target: m.label });
   }
   return out.slice(0, 5);
 }
@@ -618,7 +628,7 @@ async function applyTemplate(t) {
     const have = new Set(mistakes.map((m) => m.label));
     for (const m of t.mistakes) {
       if (have.has(m.label)) continue;
-      const mk = await store.mistakes.add({ file_id: rows[m.note].id, file_name: rows[m.note].name, page: 1, label: m.label, reason: m.reason, memo: m.memo, stage: 0, next_review: today(), graduated: false, ai: { ...m.ai, sample: true } });
+      const mk = await store.mistakes.add({ file_id: m.note == null ? null : rows[m.note].id, file_name: m.note == null ? '예시 문제' : rows[m.note].name, page: 1, label: m.label, reason: m.reason, memo: m.memo, stage: 0, next_review: today(), graduated: false, ai: { ...m.ai, sample: true } });
       mistakes.unshift(mk);
     }
     await saveS(); tk.close();

@@ -74,7 +74,7 @@ export const TEMPLATES = [
         },
       },
       {
-        note: 0, label: '[예시] Part2 · Where 의문문', reason: '듣기 놓침', memo: '첫 단어를 못 들음',
+        note: null, label: '[예시] Part2 · Where 의문문', reason: '듣기 놓침', memo: '첫 단어를 못 들음',
         ai: {
           translation: 'Q: Where can I find the printer toner? → (A) In the supply room. (B) Yes, it’s on sale. (C) At 3 o’clock. / “프린터 토너는 어디서 찾을 수 있나요?”',
           answer: '(A). Where 질문에는 장소로 답해야 합니다. (B)는 Yes/No 답변, (C)는 시간(When)에 대한 답이에요.',

@@ -177,3 +177,5 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:var(--pri);box-sh
 .goal{gap:16px}.goal label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:600}.goal input{width:auto;min-width:150px}
 .cardmsg{max-width:100%}.cardmsg .lnk{padding:4px 0}
 @media (max-width:860px){.viewer.asking .tools [data-a=mistake],.viewer.asking .tools [data-a=ask]{display:none}}
+
+.rate b{word-break:keep-all}.rates{grid-template-columns:repeat(2,1fr)}@media(min-width:520px){.rates{grid-template-columns:repeat(4,1fr)}}

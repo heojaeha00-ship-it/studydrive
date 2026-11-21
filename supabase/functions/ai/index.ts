@@ -15,6 +15,7 @@ const json = (b: unknown, s = 200) =>
 
 const LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT") ?? "60");
 type Block = { text: string } | { image: string };
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 function pickJson(text: string) {
   const m = text.match(/\{[\s\S]*\}/);
@@ -37,7 +38,8 @@ async function pickGeminiModel(key: string) {
   return geminiModel;
 }
 async function gemini(key: string, system: string, blocks: Block[], maxTokens: number) {
-  const first = await pickGeminiModel(key);
+  let first = "gemini-2.5-flash";
+  try { first = await pickGeminiModel(key); } catch (e) { console.error("pick-model", (e as Error).message); }
   const models = [...new Set([first, "gemini-2.5-flash", "gemini-2.5-flash-lite"])];
   const parts = blocks.map((b) => ("text" in b ? { text: b.text } : { inline_data: { mime_type: "image/jpeg", data: b.image } }));
   const body = JSON.stringify({
@@ -47,20 +49,24 @@ async function gemini(key: string, system: string, blocks: Block[], maxTokens: n
   });
   let last = "";
   for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: "POST", headers: { "x-goog-api-key": key, "content-type": "application/json" }, body,
       });
-      if (r.status === 429 || r.status >= 500) { last = String(r.status); await new Promise((res) => setTimeout(res, 700)); continue; }
-      if (!r.ok) { last = String(r.status); break; }
+      if (!r.ok) {
+        last = String(r.status);
+        console.error("gemini", model, r.status, (await r.text()).slice(0, 300));
+        if (r.status === 429 || r.status >= 500) await sleep(500);
+        continue;
+      }
       const d = await r.json();
       const text = (d.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
-      try { return pickJson(text); } catch { last = "json"; }
-    }
+      try { return pickJson(text); } catch { last = "json"; console.error("gemini-json", model, text.slice(0, 200)); }
+    } catch (e) { last = "net"; console.error("gemini-net", model, (e as Error).message); }
   }
   const a = Deno.env.get("ANTHROPIC_API_KEY");
   if (a) return claude(a, true, system, blocks, maxTokens);
-  throw new Error(last === "429" ? "AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요." : `AI 호출 실패 (${last})`);
+  throw new Error(last === "429" ? "AI 무료 사용량이 잠시 가득 찼어요. 1분 뒤 다시 시도해 주세요." : last === "400" || last === "403" ? "AI 키가 올바르지 않아요. 키를 다시 발급해 등록해 주세요." : `AI 호출 실패 (${last})`);
 }
 
 // ── Claude ──
@@ -82,7 +88,8 @@ function llm(smart: boolean, system: string, blocks: Block[], maxTokens: number)
   if (g) return gemini(g, system, blocks, maxTokens);
   const a = Deno.env.get("ANTHROPIC_API_KEY");
   if (a) return claude(a, smart, system, blocks, maxTokens);
-  throw new Error("AI 키가 설정되지 않았어요 (GEMINI_API_KEY 또는 ANTHROPIC_API_KEY)");
+  console.error("no-ai-key");
+  throw new Error("AI 키가 아직 등록되지 않았어요 (Supabase > Edge Functions > Secrets 에 GEMINI_API_KEY 추가)");
 }
 
 Deno.serve(async (req) => {
@@ -157,6 +164,7 @@ suggest 기준: again=핵심을 틀림/기억 못 함, hard=일부만 맞음, go
 
     return json({ error: "알 수 없는 요청" }, 400);
   } catch (e) {
+    console.error("ai-error", (e as Error).message);
     return json({ error: (e as Error).message ?? "서버 오류" }, 500);
   }
 });
