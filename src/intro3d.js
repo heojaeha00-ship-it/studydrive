@@ -16,7 +16,7 @@ export function start(el) {
   const p1 = new PointLight(0x38bdf8, 1.6, 70); p1.position.set(-12, 6, 6); scene.add(p1);
   const p2 = new PointLight(0x818cf8, 1.3, 70); p2.position.set(12, -6, 6); scene.add(p2);
 
-  const grid = new GridHelper(70, 70, 0x38bdf8, 0x1e293b); grid.rotation.x = Math.PI / 2; grid.position.z = -18; scene.add(grid);
+  // 격자 제거
 
   const group = new Group(); scene.add(group);
   const C = { sky: new Color(0x38bdf8), indigo: new Color(0x818cf8), emerald: new Color(0x34d399), amber: new Color(0xfbbf24), rose: new Color(0xfb7185), cyan: new Color(0x22d3ee), purple: new Color(0xc084fc) };
