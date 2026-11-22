@@ -12,7 +12,7 @@ const ID = 'tst' + Date.now().toString().slice(-8), PW = 'pass1234';
   ok(true, '아이디만으로 가입 후 바로 로그인');
   await p.click('#pfbtn'); await p.waitForTimeout(300);
   ok((await p.locator('.pf-head').innerText()).includes(ID), '프로필에 아이디 표시');
-  await p.click('#pflogout'); await p.waitForSelector('#em', { timeout: 15000 });
+  await p.click('#pflogout'); await p.waitForSelector('#em', { timeout: 15000 }); await p.waitForTimeout(2000);
   await p.fill('#em', ID); await p.fill('#pw', PW); await p.click('[data-m=in]');
   await p.waitForSelector('nav a[href="#/files"]', { timeout: 30000 }); ok(true, '아이디로 다시 로그인');
   ok(errs.length === 0, '오류 없음' + errs[0]);

@@ -130,14 +130,18 @@ async function openLinkDialog() {
 
 // ───────── 라우터 ─────────
 let stop3d = null;
+let routeGen = 0;
 async function route() {
+  const gen = ++routeGen;
   viewer?.destroy(); viewer = null;
   if (stop3d) { stop3d(); stop3d = null; }
   document.body.classList.remove('viewer-mode');
   const user = await store.auth.user();
+  if (gen !== routeGen) return;
   document.body.classList.toggle('auth', !user);
   if (!user) { if (stopRealtime) { stopRealtime(); stopRealtime = null; } renderSync(); return authView(); }
   if (!route.loaded) { S = { ...S, ...(await store.settings.get().catch(() => ({}))) }; route.loaded = true; applyFs(); }
+  if (gen !== routeGen) return;
   const [path, qs] = location.hash.replace(/^#\/?/, '').split('?');
   const [a, b] = path.split('/');
   renderNav(user, a || 'files');
