@@ -15,7 +15,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
         <button class="tool on" data-tool="scroll" title="스크롤" aria-label="스크롤">${ico('pointer', 18)}</button>
         <button class="tool" data-tool="pen" title="펜" aria-label="펜">${ico('pen', 18)}</button>
         <button class="tool" data-tool="hl" title="형광펜" aria-label="형광펜">${ico('mark', 18)}</button>
-        <button class="tool" data-tool="circle" title="동그라미 쳐서 오답 등록" aria-label="동그라미 오답"><span class="cm">⭕</span></button>
+        <button class="tool" data-tool="wrong" title="틀린 문제에 X·빗금(/) 표시 → 오답노트 자동 등록" aria-label="틀림 표시(오답 자동 등록)"><span class="cm">❌</span></button>
         <button class="tool" data-tool="eraser" title="지우개" aria-label="지우개">${ico('eraser', 18)}</button>
         <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}" aria-label="색 ${i + 1}"></button>`).join('')}</span>
         <button class="tool" data-a="undo" title="되돌리기" aria-label="되돌리기">${ico('undo', 18)}</button>
@@ -189,6 +189,24 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
     if (extra) drawStroke(ctx, extra, w, d);
   }
 
+  // 채점하듯 틀린 문제에 X나 빗금(/)을 치면 그 문제를 잘라 오답노트로 자동 등록한다
+  let lastMark = { n: 0, x: 0, y: 0, t: 0 };
+  function markWrong(o, st) {
+    const xs = st.p.map((q) => q[0]), ys = st.p.map((q) => q[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, size = Math.hypot(x1 - x0, y1 - y0);
+    if (st.p.length < 3 || size < 0.025) { flash('조금 더 크게 표시해 주세요'); return; }
+    const now = Date.now();
+    if (lastMark.n === o.n && now - lastMark.t < 2500 && Math.hypot(cx - lastMark.x, cy - lastMark.y) < 0.14) { lastMark.t = now; return; } // X의 두 번째 획
+    lastMark = { n: o.n, x: cx, y: cy, t: now };
+    const W0 = o.base.width, H0 = o.base.height, bandH = 0.2 * W0;
+    const sy = Math.max(0, Math.min(H0 - bandH, cy * W0 - bandH * 0.55)), sh = Math.min(bandH, H0 - sy);
+    const cv = document.createElement('canvas'); const k = Math.min(1, 1000 / W0); cv.width = Math.round(W0 * k); cv.height = Math.round(sh * k);
+    cv.getContext('2d').drawImage(o.base, 0, sy, W0, sh, 0, 0, cv.width, cv.height);
+    const url = cv.toDataURL('image/jpeg', 0.8);
+    onMistake({ page: o.n, capture: async () => url.split(',')[1], crop: url, auto: true });
+  }
+
   function bindDraw(o) {
     let cur = null, erasing = false, raf = 0, lastSend = 0, sentN = 0;
     // y 좌표도 가로폭 기준으로 정규화 (페이지 폭이 바뀌어도 위치 유지)
@@ -209,8 +227,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       o.ov.setPointerCapture(e.pointerId);
       const p = pt(e); drawingPage = o.n;
       if (tool === 'eraser') { erasing = true; erase(p); return; }
-      if (tool === 'circle') { cur = { id: 'c', t: 'circle', c: '#e03131', w: 0.0034, p: [p] }; redraw(o, cur); return; }
-      cur = { id: uuid(), t: tool === 'hl' ? 'hl' : 'pen', c: color, w: tool === 'hl' ? 0.022 : 0.0024, p: [p] }; sentN = 0;
+      cur = { id: uuid(), t: tool === 'hl' ? 'hl' : 'pen', c: tool === 'wrong' ? '#e03131' : color, w: tool === 'hl' ? 0.022 : tool === 'wrong' ? 0.0036 : 0.0024, p: [p] }; sentN = 0;
       redraw(o, cur); sendLive();
     });
     o.ov.addEventListener('pointermove', (e) => {
@@ -218,29 +235,11 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       if (!cur) return;
       for (const ev of e.getCoalescedEvents?.() ?? [e]) cur.p.push(pt(ev));
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (cur) redraw(o, cur); });
-      if (cur.t === 'circle') return;
       const now = performance.now(); if (now - lastSend > 55) { lastSend = now; sendLive(); }
     });
     const end = () => {
       erasing = false; drawingPage = 0;
       if (!cur) return;
-      if (cur.t === 'circle') {
-        const c = cur; cur = null; redraw(o);
-        const xs = c.p.map((q) => q[0]), ys = c.p.map((q) => q[1]);
-        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-        if (c.p.length < 8 || x1 - x0 < 0.06 || y1 - y0 < 0.03) { flash('동그라미를 조금 더 크게 그려 주세요'); return; }
-        const closed = Math.hypot(c.p[0][0] - c.p.at(-1)[0], c.p[0][1] - c.p.at(-1)[1]) < Math.max(x1 - x0, y1 - y0) * 0.6;
-        if (!closed) { flash('동그라미를 닫아 주세요'); return; }
-        redraw(o, { ...c, p: [...c.p, c.p[0]] });
-        const W0 = o.base.width, pad = 0.03;
-        const sx = Math.max(0, (x0 - pad) * W0), sy = Math.max(0, (y0 - pad) * W0), sw = Math.min(W0 - sx, (x1 - x0 + pad * 2) * W0), sh = Math.min(o.base.height - sy, (y1 - y0 + pad * 2) * W0);
-        const cv = document.createElement('canvas'); const k = Math.min(1, 1000 / sw); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
-        cv.getContext('2d').drawImage(o.base, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
-        const url = cv.toDataURL('image/jpeg', 0.8);
-        setTimeout(() => redraw(o), 900);
-        onMistake({ page: o.n, capture: async () => url.split(',')[1], crop: url, auto: true });
-        return;
-      }
       sendLive();
       const st = cur; cur = null;
       (strokes[o.n] ||= []).push(st);
@@ -249,6 +248,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       flash('저장 중…');
       persistAdd(o.n, st);
       onEvent?.('draw');
+      if (tool === 'wrong') markWrong(o, st);
     };
     o.ov.addEventListener('pointerup', end);
     o.ov.addEventListener('pointercancel', end);

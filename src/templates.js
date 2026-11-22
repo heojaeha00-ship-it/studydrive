@@ -10,7 +10,7 @@ export const PRESETS = {
 export const TEMPLATES = [
   {
     id: 'sea',
-    short: '해상교통법(COLREG)·항해학 · 해기사 시험 · 동그라미 오답',
+    short: '해상교통법(COLREG)·항해학 · 해기사 시험 · X 표시 오답',
     emoji: '⚓',
     title: '해기사·항해 시험',
     who: '해기사 면허·항해학·해상교통법 학습 (해양대생)',
@@ -18,7 +18,7 @@ export const TEMPLATES = [
     preset: 'exam',
     reasons: ['규칙 번호 혼동', '용어·영문 해석', '등화·형상물 암기', '피항 판단 실수', '계산 실수', '시간 부족', '기타'],
     cats: ['항해', '법규', '운용·기관', '영어', '기출'],
-    steps: ['기출·교재 PDF를 올리면 AI가 과목별로 자동 분류', '틀린 문제를 펜으로 동그라미 치면 오답이 바로 등록돼요', '규칙 번호·등화 같은 암기는 간격 반복으로 복습'],
+    steps: ['기출·교재 PDF를 올리면 AI가 과목별로 자동 분류', '채점하듯 틀린 문제에 X·빗금(/)을 치면 오답이 바로 등록돼요', '규칙 번호·등화 같은 암기는 간격 반복으로 복습'],
     notes: [
       {
         name: 'COLREG 샘플 문제 (직접 제작).pdf', category: '법규', tags: [EX, 'COLREG'], summary: '충돌예방규칙 5문제 연습용 샘플', sample: 'colreg',

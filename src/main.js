@@ -248,12 +248,13 @@ function authView() {
   view.innerHTML = `
     <div class="landing">
       <div id="bg3d" class="bg3d" aria-hidden="true"></div>
+      <video class="lp-bgvid" autoplay muted loop playsinline preload="auto" aria-hidden="true" poster="" ><source src="login-bg.mp4" type="video/mp4"></video>
       <header class="lp-head"><div class="brand">${logo(30)} <span>스터디드라이브</span></div>
         <nav class="lp-nav"><a href="#lp-feats" data-scroll>기능</a><a href="#lp-edu" data-scroll>학습과학</a></nav></header>
       <section class="lp-hero">
         <div class="lp-copy">
           <span class="lp-pill"><i></i>AI 학습 드라이브 · 개인 출품작</span>
-          <h1>틀린 문제에 동그라미만 치면<br><em>오답노트와 복습표</em>가 됩니다</h1>
+          <h1>틀린 문제에 X(빗금)만 치면<br><em>오답노트와 복습표</em>가 됩니다</h1>
           <p>태블릿에서 풀고, 폰으로 복습하고, PC로 정리하세요.<br>자료·필기·오답·복습이 하나로 이어지는 학습 드라이브예요.</p>
           <div class="lp-cta">
             ${store.mode === 'cloud' ? '<button class="btn primary lg" id="demo">가입 없이 체험하기 ✨</button>' : ''}
@@ -284,6 +285,13 @@ function authView() {
         <span>먼저 떠올려 적기(인출 연습)</span><span>1·3·7·14일 간격 복습</span><span>확신도 체크(메타인지)</span><span>시험 D-day·성장 기록</span></section>
       <footer class="lp-foot">제출자 허재하 · 항해정보시스템학부 · 2024175 &nbsp;|&nbsp; 바이브코딩 경진대회 개인 출품작</footer>
     </div>`;
+  const bv = $('.lp-bgvid');
+  if (bv) {
+    const off = () => { bv.remove(); $('#bg3d')?.classList.remove('behind'); };
+    $('source', bv).addEventListener('error', off); bv.addEventListener('error', off);
+    bv.addEventListener('playing', () => { $('#bg3d')?.classList.add('behind'); bv.classList.add('on'); });
+    bv.play?.().catch(off);
+  }
   import('./intro3d.js').then((m) => { if ($('#bg3d')) stop3d = m.start($('#bg3d')); }).catch(() => {});
   $$('[data-scroll]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); $(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' }); }));
   const go = async (m, email, pw) => {
