@@ -268,6 +268,8 @@ function authView() {
           <ul><li>실시간 반영 — 필기·오답·파일</li><li>연결된 기기 표시 — 💻 PC · 📟 태블릿 · 📱 폰</li><li>QR 한 번으로 다른 기기 연결</li></ul></div>
         <svg class="lp-sync-art" viewBox="0 0 420 240" role="img" aria-label="PC, 태블릿, 폰이 클라우드를 통해 실시간으로 연결되는 그림"><use href="#syncart-big"/></svg>
       </section>
+      <section class="lp-video"><div class="lpv-copy"><h2>15초로 보는 스터디드라이브</h2><p>필기가 다른 기기에 바로 따라 그려지고, AI가 정리하고, 잊을 때쯤 복습을 알려줘요.</p></div>
+        <video controls playsinline preload="none" poster="poster.jpg" src="promo.mp4" aria-label="스터디드라이브 15초 소개 영상"></video></section>
       <section id="lp-feats" class="lp-feats">
         ${FEATS.map(([i, c, t, d]) => `<article class="glass"><span class="fi" style="--c:${c}">${ico(i, 22)}</span><h3>${t}</h3><p>${d}</p></article>`).join('')}
       </section>
@@ -365,6 +367,11 @@ async function filesView() {
   }
 }
 
+function heatmap() {
+  const W = 14, tot = [...Array(W * 7)].map((_, i) => S.activity[today(-(W * 7 - 1 - i))] || 0), mx = Math.max(1, ...tot), days = tot.filter(Boolean).length;
+  return `<section class="card heat" aria-label="최근 14주 학습 기록"><div class="heat-h"><b>학습 기록</b><small class="muted">최근 14주 · ${days}일 공부했어요</small></div>
+    <div class="heat-g">${tot.map((v, i) => `<i class="l${v ? Math.min(4, Math.ceil((v / mx) * 4)) : 0}" title="${today(-(W * 7 - 1 - i))} · ${v}회"></i>`).join('')}</div></section>`;
+}
 function statsHtml() {
   const n = due().length, grad = mistakes.filter((m) => m.graduated).length;
   const wk = [6, 5, 4, 3, 2, 1, 0].map((i) => S.activity[today(-i)] || 0), mx = Math.max(1, ...wk);
@@ -1005,6 +1012,13 @@ async function rate(r) {
   done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; revealed = false; drawReview();
 }
 addEventListener('keydown', (e) => {
+  if (e.target.closest?.('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const go = { g: '#/files', r: '#/review', m: '#/mistakes', e: '#/explore' }[e.key];
+  if (go && nav?.childElementCount && !$('#rv .rvcard')) { location.hash = go; return; }
+  if (e.key === '/' && $('#q')) { e.preventDefault(); $('#q').focus(); return; }
+  if (e.key === '?') { const d = $('#dlg'); d.className = ''; d.innerHTML = `<form class="dlg-body"><h3>⌨️ 단축키</h3><div class="keys"><kbd>G</kbd>내 파일<kbd>R</kbd>오늘 복습<kbd>M</kbd>오답노트<kbd>E</kbd>둘러보기<kbd>/</kbd>검색<kbd>1~4</kbd>복습 평가<kbd>?</kbd>이 도움말</div><div class="row end"><button class="btn primary" data-x>닫기</button></div></form>`; d.showModal(); $('[data-x]', d).onclick = (ev) => { ev.preventDefault(); d.close(); }; }
+});
+addEventListener('keydown', (e) => {
   if (!$('#rv') || e.target.closest('input,textarea,select')) return;
   const k = RATINGS[Number(e.key) - 1]?.[0]; if (k) rate(k);
 });
@@ -1129,6 +1143,7 @@ async function exploreView() {
       <div class="steps">${STEP_LABEL.map((l, i) => `<div class="step ${st[i] ? 'ok' : ''}"><i>${st[i] ? '✓' : i + 1}</i><span>${l}</span></div>`).join('')}</div>
     </section>
 
+    ${heatmap()}
     ${store.mode === 'cloud' ? `
     <section class="card syncdemo">
       <div class="sd-copy">
