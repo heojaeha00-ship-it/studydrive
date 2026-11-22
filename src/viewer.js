@@ -15,6 +15,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
         <button class="tool on" data-tool="scroll" title="스크롤" aria-label="스크롤">${ico('pointer', 18)}</button>
         <button class="tool" data-tool="pen" title="펜" aria-label="펜">${ico('pen', 18)}</button>
         <button class="tool" data-tool="hl" title="형광펜" aria-label="형광펜">${ico('mark', 18)}</button>
+        <button class="tool" data-tool="circle" title="동그라미 쳐서 오답 등록" aria-label="동그라미 오답"><span class="cm">⭕</span></button>
         <button class="tool" data-tool="eraser" title="지우개" aria-label="지우개">${ico('eraser', 18)}</button>
         <span class="colors">${COLORS.map((c, i) => `<button class="dot${i === 0 ? ' on' : ''}" data-color="${c}" style="background:${c}" aria-label="색 ${i + 1}"></button>`).join('')}</span>
         <button class="tool" data-a="undo" title="되돌리기" aria-label="되돌리기">${ico('undo', 18)}</button>
@@ -208,6 +209,7 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       o.ov.setPointerCapture(e.pointerId);
       const p = pt(e); drawingPage = o.n;
       if (tool === 'eraser') { erasing = true; erase(p); return; }
+      if (tool === 'circle') { cur = { id: 'c', t: 'circle', c: '#e03131', w: 0.0034, p: [p] }; redraw(o, cur); return; }
       cur = { id: uuid(), t: tool === 'hl' ? 'hl' : 'pen', c: color, w: tool === 'hl' ? 0.022 : 0.0024, p: [p] }; sentN = 0;
       redraw(o, cur); sendLive();
     });
@@ -216,11 +218,29 @@ export async function mountViewer(root, { store, row, page = 1, onMistake, onBac
       if (!cur) return;
       for (const ev of e.getCoalescedEvents?.() ?? [e]) cur.p.push(pt(ev));
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (cur) redraw(o, cur); });
+      if (cur.t === 'circle') return;
       const now = performance.now(); if (now - lastSend > 55) { lastSend = now; sendLive(); }
     });
     const end = () => {
       erasing = false; drawingPage = 0;
       if (!cur) return;
+      if (cur.t === 'circle') {
+        const c = cur; cur = null; redraw(o);
+        const xs = c.p.map((q) => q[0]), ys = c.p.map((q) => q[1]);
+        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+        if (c.p.length < 8 || x1 - x0 < 0.06 || y1 - y0 < 0.03) { flash('동그라미를 조금 더 크게 그려 주세요'); return; }
+        const closed = Math.hypot(c.p[0][0] - c.p.at(-1)[0], c.p[0][1] - c.p.at(-1)[1]) < Math.max(x1 - x0, y1 - y0) * 0.6;
+        if (!closed) { flash('동그라미를 닫아 주세요'); return; }
+        redraw(o, { ...c, p: [...c.p, c.p[0]] });
+        const W0 = o.base.width, pad = 0.03;
+        const sx = Math.max(0, (x0 - pad) * W0), sy = Math.max(0, (y0 - pad) * W0), sw = Math.min(W0 - sx, (x1 - x0 + pad * 2) * W0), sh = Math.min(o.base.height - sy, (y1 - y0 + pad * 2) * W0);
+        const cv = document.createElement('canvas'); const k = Math.min(1, 1000 / sw); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
+        cv.getContext('2d').drawImage(o.base, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+        const url = cv.toDataURL('image/jpeg', 0.8);
+        setTimeout(() => redraw(o), 900);
+        onMistake({ page: o.n, capture: async () => url.split(',')[1], crop: url, auto: true });
+        return;
+      }
       sendLive();
       const st = cur; cur = null;
       (strokes[o.n] ||= []).push(st);

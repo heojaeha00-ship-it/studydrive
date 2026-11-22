@@ -422,3 +422,6 @@ dialog.sheet{width:min(420px,94vw)}.sheet-list{display:grid;gap:2px;margin:6px 0
 .tile:focus-visible{outline:3px solid var(--pri);outline-offset:2px}
 @media (prefers-contrast:more){:root{--line:#8a93a6;--muted:#3b4252}}
 .heat-g{grid-template-rows:repeat(7,16px);grid-auto-columns:16px;justify-content:start;gap:5px}.heat-g i{width:16px;height:16px;min-width:0;max-width:none;aspect-ratio:auto}
+
+.tool .cm{font-size:16px;line-height:1}
+.crop{max-width:100%;max-height:200px;border:2px solid #e03131;border-radius:10px;display:block;margin:6px auto 10px;object-fit:contain;background:#fff}

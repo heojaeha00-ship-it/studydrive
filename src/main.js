@@ -833,13 +833,40 @@ async function viewerView(id, page) {
 }
 
 // ───────── 오답 등록 / AI 해설 ─────────
-function mistakeDialog({ file, page, capture }) {
+async function autoMistake({ file, page, capture }) {
+  const img = await capture().catch(() => null);
+  const base = file.name.replace(/\.(pdf|png|jpe?g|webp)$/i, '').replace(/\s*\(.*?\)\s*/g, ' ').trim();
+  const nth = mistakes.filter((x) => x.file_id === file.id && x.page === page).length + 1;
+  try {
+    const m = await store.mistakes.add({ file_id: file.id, file_name: file.name, page, label: `${base} · ${page}쪽 #${nth}`, reason: S.reasons[S.reasons.length - 1] || '기타', memo: '', stage: 0, next_review: today(S.intervals[0]), graduated: false });
+    mistakes.unshift(m); badge(); bump(); hap(20);
+    toast(`⭕ 오답노트에 자동 저장 · ${S.intervals[0]}일 뒤 복습`, 6000, { label: '이유 고르기', fn: () => editMistake(m.id) });
+    explain(m, img, true);
+  } catch (er) { toast('저장 실패: ' + er.message, 5000); }
+}
+function editMistake(id) {
+  const m = mistakes.find((x) => x.id === id); if (!m) return;
+  const d = $('#dlg'); d.className = '';
+  d.innerHTML = `<form class="dlg-body"><h3>오답 정보 수정</h3>
+    <label>이름<input name="label" value="${esc(m.label)}" required></label>
+    <label>틀린 이유<select name="reason">${S.reasons.map((r) => `<option${r === m.reason ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>
+    <label>메모<textarea name="memo" rows="2">${esc(m.memo || '')}</textarea></label>
+    <div class="row end"><button type="button" class="btn ghost" data-x>닫기</button><button class="btn primary">저장</button></div></form>`;
+  d.showModal(); $('[data-x]', d).onclick = () => d.close();
+  $('form', d).onsubmit = async (e) => {
+    e.preventDefault(); const f = e.target;
+    try { const n = await store.mistakes.update(id, { label: f.label.value.trim(), reason: f.reason.value, memo: f.memo.value.trim(), custom: true }); mistakes = mistakes.map((x) => (x.id === n.id ? n : x)); d.close(); if ($('#mlist')) drawMistakes(); toast('수정했어요'); } catch (er) { toast(er.message, 4000); }
+  };
+}
+function mistakeDialog({ file, page, capture, crop, auto }) {
+  if (auto) return autoMistake({ file, page, capture });
   const d = $('#dlg');
   d.innerHTML = `
     <form class="dlg-body">
       <h3>오답 등록</h3>
       <p class="muted">${esc(file.name)} · ${page}쪽</p>
-      <label>문제 번호/이름<input name="label" placeholder="예: Part5 #103" required></label>
+      ${crop ? `<img class="crop" src="${crop}" alt="동그라미 친 문제">` : ''}
+      <label>문제 번호/이름<input name="label" placeholder="예: Part5 #103" value="${crop ? `${page}쪽 동그라미 문제` : ''}" required></label>
       <label>틀린 이유<select name="reason">${S.reasons.map((r) => `<option>${esc(r)}</option>`).join('')}</select></label>
       <label>메모 (선택)<textarea name="memo" rows="3" placeholder="헷갈렸던 포인트"></textarea></label>
       <label class="chk"><input type="checkbox" name="ai" checked> 저장하고 AI 해설·유사 문제 받기</label>
@@ -863,7 +890,7 @@ function mistakeDialog({ file, page, capture }) {
   };
 }
 
-async function explain(m, image) {
+async function explain(m, image, quiet) {
   const t = toast('🤖 AI 해설 생성 중… (10~20초)', 0);
   try {
     if (!image && m.file_id) {
@@ -871,7 +898,10 @@ async function explain(m, image) {
       if (row) image = await pageImage(await store.files.blob(row), kind(row.name, row.mime), m.page || 1);
     }
     const r = await ai('explain', { label: m.label, reason: m.reason, memo: m.memo, image });
-    const n = await store.mistakes.update(m.id, { ai: r });
+    const patch = { ai: r };
+    const cur = mistakes.find((x) => x.id === m.id);
+    if (quiet && cur && !cur.custom && r.translation) patch.label = `${cur.label.split(' #')[0]} · ${String(r.translation).replace(/\s+/g, ' ').slice(0, 24)}`;
+    const n = await store.mistakes.update(m.id, patch);
     mistakes = mistakes.map((x) => (x.id === n.id ? n : x));
     const qk = queue.findIndex((x) => x.id === n.id); if (qk >= 0) queue[qk] = n;
     t.close(); toast('✅ AI 해설이 준비됐어요');
@@ -1192,7 +1222,8 @@ async function applyTemplate(t) {
       let row = files.find((f) => f.name === n.name && !f.deleted_at);
       if (!row) {
         let file;
-        if (n.sample === 'toeic5') file = new File([await makeSamplePdf('TOEIC Part 5 Practice (original sample)', ['1. The manager asked all employees to ______ the report before Friday.', '   (A) submit   (B) submitting   (C) submission   (D) submitted', '', '2. The company will ______ a new energy-saving policy next month.', '   (A) implement   (B) appoint   (C) attend   (D) reserve', '', '3. Ms. Park was ______ for her outstanding contribution to the project.', '   (A) recognize   (B) recognized   (C) recognition   (D) recognizing', '', '4. Please keep your receipt ______ you need to return the item.', '   (A) in case   (B) because of   (C) as well as   (D) whereas', '', '5. The new software is ______ faster than the previous version.', '   (A) significant   (B) significantly   (C) signify   (D) significance', '', 'Answers: 1 A / 2 A / 3 B / 4 A / 5 B'])], n.name, { type: 'application/pdf' });
+        if (n.sample === 'colreg') file = new File([await makeSamplePdf('COLREG Practice (original sample)', ['1. Rule 14: Two power-driven vessels meet head-on with risk of collision.', '   Each vessel shall alter course to ______.', '   (A) port   (B) starboard   (C) stop engines   (D) sound five blasts', '', '2. Rule 15: Vessel A sees vessel B on her starboard side crossing. The give-way vessel is ______.', '   (A) A   (B) B   (C) both   (D) the larger vessel', '', '3. The masthead light shows an unbroken light over an arc of ______ degrees.', '   (A) 112.5   (B) 135   (C) 225   (D) 360', '', '4. Rule 5 requires every vessel to maintain a proper ______ at all times.', '   (A) speed log   (B) look-out   (C) anchor watch   (D) radio watch', '', '5. A sternlight shows an arc of ______ degrees.', '   (A) 112.5   (B) 135   (C) 225   (D) 360', '', 'Answers: 1 B / 2 A / 3 C / 4 B / 5 B'])], n.name, { type: 'application/pdf' });
+        else if (n.sample === 'toeic5') file = new File([await makeSamplePdf('TOEIC Part 5 Practice (original sample)', ['1. The manager asked all employees to ______ the report before Friday.', '   (A) submit   (B) submitting   (C) submission   (D) submitted', '', '2. The company will ______ a new energy-saving policy next month.', '   (A) implement   (B) appoint   (C) attend   (D) reserve', '', '3. Ms. Park was ______ for her outstanding contribution to the project.', '   (A) recognize   (B) recognized   (C) recognition   (D) recognizing', '', '4. Please keep your receipt ______ you need to return the item.', '   (A) in case   (B) because of   (C) as well as   (D) whereas', '', '5. The new software is ______ faster than the previous version.', '   (A) significant   (B) significantly   (C) signify   (D) significance', '', 'Answers: 1 A / 2 A / 3 B / 4 A / 5 B'])], n.name, { type: 'application/pdf' });
         else if (n.blank) file = new File([await makeNotePdf({ paper: n.blank, pages: 1 })], n.name, { type: 'application/pdf' });
         else file = new File([n.content], n.name, { type: 'text/markdown' });
         row = await store.files.add(file);
