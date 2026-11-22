@@ -252,7 +252,6 @@ function authView() {
   view.innerHTML = `
     <div class="landing">
       <div id="bg3d" class="bg3d" aria-hidden="true"></div>
-      <video class="lp-bgvid" autoplay muted loop playsinline preload="auto" aria-hidden="true" poster="" ><source src="login-bg.mp4" type="video/mp4"></video>
       <header class="lp-head"><div class="brand">${logo(30)} <span>스터디드라이브</span></div>
         <nav class="lp-nav"><a href="#lp-feats" data-scroll>기능</a><a href="#lp-edu" data-scroll>학습과학</a></nav></header>
       <section class="lp-hero">
@@ -852,7 +851,7 @@ async function autoMistake({ file, page, capture }) {
   try {
     const m = await store.mistakes.add({ file_id: file.id, file_name: file.name, page, label: `${base} · ${page}쪽 #${nth}`, reason: S.reasons[S.reasons.length - 1] || '기타', memo: '', stage: 0, next_review: today(S.intervals[0]), graduated: false });
     mistakes.unshift(m); badge(); bump(); hap(20);
-    toast(`⭕ 오답노트에 자동 저장 · ${S.intervals[0]}일 뒤 복습`, 6000, { label: '이유 고르기', fn: () => editMistake(m.id) });
+    toast(`❌ 오답노트에 자동 저장 · ${S.intervals[0]}일 뒤 복습`, 6000, { label: '이유 고르기', fn: () => editMistake(m.id) });
     explain(m, img, true);
   } catch (er) { toast('저장 실패: ' + er.message, 5000); }
 }
