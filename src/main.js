@@ -253,7 +253,7 @@ function authView() {
       <section class="lp-hero">
         <div class="lp-copy">
           <span class="lp-pill"><i></i>AI 학습 드라이브 · 개인 출품작</span>
-          <h1>문서를 올리면<br><em>내 오답이 내 복습표</em>가 됩니다</h1>
+          <h1>틀린 문제에 동그라미만 치면<br><em>오답노트와 복습표</em>가 됩니다</h1>
           <p>태블릿에서 풀고, 폰으로 복습하고, PC로 정리하세요.<br>자료·필기·오답·복습이 하나로 이어지는 학습 드라이브예요.</p>
           <div class="lp-cta">
             ${store.mode === 'cloud' ? '<button class="btn primary lg" id="demo">가입 없이 체험하기 ✨</button>' : ''}

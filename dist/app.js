@@ -194,7 +194,7 @@ end`},Fw=function(){for(var r=[],t=0;t<arguments.length;t++)r[t]=arguments[t];re
       <section class="lp-hero">
         <div class="lp-copy">
           <span class="lp-pill"><i></i>AI \uD559\uC2B5 \uB4DC\uB77C\uC774\uBE0C \xB7 \uAC1C\uC778 \uCD9C\uD488\uC791</span>
-          <h1>\uBB38\uC11C\uB97C \uC62C\uB9AC\uBA74<br><em>\uB0B4 \uC624\uB2F5\uC774 \uB0B4 \uBCF5\uC2B5\uD45C</em>\uAC00 \uB429\uB2C8\uB2E4</h1>
+          <h1>\uD2C0\uB9B0 \uBB38\uC81C\uC5D0 \uB3D9\uADF8\uB77C\uBBF8\uB9CC \uCE58\uBA74<br><em>\uC624\uB2F5\uB178\uD2B8\uC640 \uBCF5\uC2B5\uD45C</em>\uAC00 \uB429\uB2C8\uB2E4</h1>
           <p>\uD0DC\uBE14\uB9BF\uC5D0\uC11C \uD480\uACE0, \uD3F0\uC73C\uB85C \uBCF5\uC2B5\uD558\uACE0, PC\uB85C \uC815\uB9AC\uD558\uC138\uC694.<br>\uC790\uB8CC\xB7\uD544\uAE30\xB7\uC624\uB2F5\xB7\uBCF5\uC2B5\uC774 \uD558\uB098\uB85C \uC774\uC5B4\uC9C0\uB294 \uD559\uC2B5 \uB4DC\uB77C\uC774\uBE0C\uC608\uC694.</p>
           <div class="lp-cta">
             ${W.mode==="cloud"?'<button class="btn primary lg" id="demo">\uAC00\uC785 \uC5C6\uC774 \uCCB4\uD5D8\uD558\uAE30 \u2728</button>':""}
