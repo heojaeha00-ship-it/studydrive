@@ -24,6 +24,10 @@ const ai = (action, payload) => store.ai(action, payload);
 const saveS = () => store.settings.set(S).catch(() => {});
 const bump = () => { S.activity[today()] = (S.activity[today()] || 0) + 1; saveS(); };
 const flag = (k) => { if (!S.flags[k]) { S.flags[k] = 1; saveS(); } };
+const xp = () => Object.values(S.activity).reduce((a, b) => a + b, 0) * 10;
+const level = () => Math.floor(Math.sqrt(xp() / 30)) + 1;
+const hap = (ms = 15) => { try { navigator.vibrate?.(ms); } catch {} };
+const applyFs = () => { document.body.style.zoom = { sm: 0.92, md: 1, lg: 1.12 }[S.fs || 'md']; };
 const streak = () => { let i = S.activity[today()] > 0 ? 0 : 1, n = 0; while (S.activity[today(-i)] > 0) { n++; i++; } return n; };
 const hist = () => mistakes.flatMap((m) => m.hist || []);
 function growthHtml() {
@@ -133,7 +137,7 @@ async function route() {
   const user = await store.auth.user();
   document.body.classList.toggle('auth', !user);
   if (!user) { if (stopRealtime) { stopRealtime(); stopRealtime = null; } renderSync(); return authView(); }
-  if (!route.loaded) { S = { ...S, ...(await store.settings.get().catch(() => ({}))) }; route.loaded = true; }
+  if (!route.loaded) { S = { ...S, ...(await store.settings.get().catch(() => ({}))) }; route.loaded = true; applyFs(); }
   const [path, qs] = location.hash.replace(/^#\/?/, '').split('?');
   const [a, b] = path.split('/');
   renderNav(user, a || 'files');
@@ -165,10 +169,10 @@ let curUser = null;
 function renderNav(user, active) {
   curUser = user;
   const on = (k) => (active === k || (k === 'files' && active === 'f') ? 'on' : '');
-  const pf = profileOf(user);
+  const pf = profileOf(user); applyFs();
   nav.innerHTML = `
     <div class="brand">${logo(26)} <span>스터디드라이브</span></div>
-    <button class="profile" id="pfbtn" aria-label="내 프로필">${avatarHtml(pf)}<span class="pf-t"><b>${esc(pf.name)}</b><small>${esc(pf.bio || (hasAcct(user) ? acctId(user) : store.mode === 'cloud' ? '게스트 체험 중' : '이 기기에만 저장'))}</small></span><i>${ico('pen', 14)}</i></button>
+    <button class="profile" id="pfbtn" aria-label="내 프로필">${avatarHtml(pf)}<span class="pf-t"><b>${esc(pf.name)}</b><small>Lv.${level()} · ${esc(pf.bio || (hasAcct(user) ? acctId(user) : store.mode === 'cloud' ? '게스트 체험 중' : '이 기기에만 저장'))}</small></span><i>${ico('pen', 14)}</i></button>
     <a href="#/files" class="${on('files')}"><i>${ico('folder')}</i><span>내 파일</span></a>
     <a href="#/review" class="${on('review')}"><i>${ico('repeat')}</i><span>오늘 복습</span><b id="due-badge" hidden></b></a>
     <a href="#/mistakes" class="${on('mistakes') || on('quiz')}"><i>${ico('book')}</i><span>오답노트</span></a>
@@ -185,10 +189,12 @@ function openProfile(user = curUser) {
   d.className = '';
   d.innerHTML = `<form class="dlg-body profile-dlg">
     <div class="pf-head"><span id="pfav">${avatarHtml(pf, 'big')}</span><div><h3>내 프로필</h3><small class="muted">${esc(store.mode === 'cloud' ? (hasAcct(user) ? `아이디: ${acctId(user)}` : '게스트 계정 (이 브라우저에 저장)') : '이 기기에서만 쓰는 로컬 모드')}</small></div></div>
+    <div class="lvl" title="복습·필기 활동으로 쌓여요"><b>Lv.${level()}</b><div><i style="width:${Math.max(4, Math.round(((xp() / 30) - Math.pow(level() - 1, 2)) / (Math.pow(level(), 2) - Math.pow(level() - 1, 2)) * 100))}%"></i></div><small>${xp()} XP · 🔥 ${streak()}일</small></div>
     <label>닉네임<input name="name" maxlength="14" value="${esc(pf.name)}" placeholder="닉네임"></label>
     <label>한 줄 소개<input name="bio" maxlength="40" value="${esc(pf.bio)}" placeholder="예: 토익 900 · 12월 시험"></label>
     <div class="pf-sec">아이콘</div><div class="emojis av">${AVATARS.map((e) => `<button type="button" class="emo${e === pf.emoji ? ' on' : ''}" data-e="${e}" aria-label="아이콘 ${e}">${e}</button>`).join('')}</div>
     <div class="pf-sec">색상</div><div class="swatches">${PCOLORS.map((c) => `<button type="button" class="sw${c === pf.color ? ' on' : ''}" data-c="${c}" style="--c:${c}" aria-label="색상"></button>`).join('')}</div>
+    <div class="pf-sec">글자 크기</div><div class="chips" id="pffs">${[['sm', '작게'], ['md', '보통'], ['lg', '크게']].map(([k, l]) => `<button type="button" class="chip${(S.fs || 'md') === k ? ' on' : ''}" data-fs="${k}">${l}</button>`).join('')}</div>
     <details class="pf-more"><summary>학습 설정</summary>
       <div class="row goal"><label>시험일<input type="date" name="gdate" value="${esc(S.goal?.date || '')}"></label><label>목표 점수<input type="number" name="gtarget" min="10" max="990" step="5" placeholder="예: 900" value="${esc(S.goal?.target || '')}"></label></div>
       <div class="pf-sec">복습 주기</div><div class="chips" id="pfpresets">${Object.entries(PRESETS).map(([k, p]) => `<button type="button" class="chip${JSON.stringify(p.intervals) === JSON.stringify(S.intervals) ? ' on' : ''}" data-p="${k}">${p.name}</button>`).join('')}</div>
@@ -201,6 +207,7 @@ function openProfile(user = curUser) {
   $$('.av .emo', d).forEach((b) => (b.onclick = () => { em = b.dataset.e; $$('.av .emo', d).forEach((x) => x.classList.toggle('on', x === b)); paint(); }));
   $$('.sw', d).forEach((b) => (b.onclick = () => { col = b.dataset.c; $$('.sw', d).forEach((x) => x.classList.toggle('on', x === b)); paint(); }));
   $$('#pfpresets .chip', d).forEach((c) => (c.onclick = () => { iv = PRESETS[c.dataset.p].intervals; $$('#pfpresets .chip', d).forEach((x) => x.classList.toggle('on', x === c)); }));
+  $$('#pffs .chip', d).forEach((c) => (c.onclick = () => { S.fs = c.dataset.fs; applyFs(); $$('#pffs .chip', d).forEach((x) => x.classList.toggle('on', x === c)); }));
   $('[data-x]', d).onclick = () => d.close();
   $('#pflogout', d)?.addEventListener('click', async () => { if (guest && !confirm('게스트 데이터는 로그아웃하면 사라져요. 계속할까요?')) return; d.close(); await store.auth.signOut(); route.loaded = false; route(); });
   $('#pfup', d)?.addEventListener('click', () => { d.close(); upgradeDialog(); });
@@ -387,7 +394,7 @@ const tileIcon = (f) => { const [a, b, t] = TILE[tileKind(f)]; return `<div clas
 
 function fileTile(f, trash) {
   const sel = FV.sel.has(f.id);
-  return `<article class="tile file${sel ? ' sel' : ''}" data-id="${f.id}">
+  return `<article class="tile file${sel ? ' sel' : ''}" data-id="${f.id}" tabindex="0" role="button" aria-label="${esc(f.name)} 열기">
     ${FV.selecting ? `<label class="chk"><input type="checkbox" data-sel ${sel ? 'checked' : ''} aria-label="선택"></label>` : ''}
     ${tileIcon(f)}
     ${trash ? `<span class="tbadge">${daysLeft(f)}일 뒤 삭제</span>` : ''}
@@ -399,7 +406,7 @@ function fileTile(f, trash) {
 function folderTile(f) {
   const inner = [...files.filter((x) => alive(x) && x.folder_id === f.id), ...folders.filter((x) => x.parent_id === f.id)].slice(0, 4);
   const mini = inner.map((x) => (x.deleted_at !== undefined || x.mime !== undefined ? (() => { const [a, b] = TILE[tileKind(x)]; return `<i style="--g1:${a};--g2:${b}"></i>`; })() : '<i style="--g1:#74c0fc;--g2:#3451c7"></i>')).join('');
-  return `<article class="tile folder" data-fid="${f.id}">
+  return `<article class="tile folder" data-fid="${f.id}" tabindex="0" role="button" aria-label="${esc(f.name)} 폴더 열기">
     <div class="ticon folderi"><span class="femo">${esc(f.emoji || '📁')}</span><div class="fprev">${mini}</div></div>
     <h3 class="tname">${esc(f.name)}</h3>
     <div class="tmeta"><small>${itemsIn(f.id)}개 항목</small></div>
@@ -1009,9 +1016,10 @@ async function rate(r) {
   const patch = p.graduated ? { graduated: true, stage: p.stage, last_result: r, hist: hh } : { stage: p.stage, next_review: p.next_review, last_result: r, hist: hh };
   try { const n = await store.mistakes.update(m.id, patch); mistakes = mistakes.map((x) => (x.id === n.id ? n : x)); queue[qi] = n; } catch (e) { rating = false; return toast('저장 실패: ' + e.message); }
   sessionLog.push({ r, c: conf }); conf = null;
-  done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; revealed = false; drawReview();
+  hap(r === 'again' ? [10, 40, 10] : 18); done[r] = (done[r] || 0) + 1; qi++; bump(); badge(); rating = false; revealed = false; drawReview();
 }
 addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('tile') && !e.target.classList.contains('skel')) { e.preventDefault(); e.target.click(); return; }
   if (e.target.closest?.('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
   const go = { g: '#/files', r: '#/review', m: '#/mistakes', e: '#/explore' }[e.key];
   if (go && nav?.childElementCount && !$('#rv .rvcard')) { location.hash = go; return; }
