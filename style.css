@@ -434,3 +434,4 @@ dialog.sheet{width:min(420px,94vw)}.sheet-list{display:grid;gap:2px;margin:6px 0
   main{padding-top:58px}
   .nav a{flex:1;min-width:0;padding-inline:4px}
 }
+@media (max-width:860px){.nav a.on::before{display:none}}
